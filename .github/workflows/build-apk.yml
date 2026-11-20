@@ -59,6 +59,7 @@ jobs:
             -v "${{ github.workspace }}:/bo1/src" \
             -v "${{ runner.temp }}/bo1-cache:/bo1-cache" \
             bo1-build
+          docker exec bo1-x64 bash -c "apt-get update -qq && apt-get install -y -qq --no-install-recommends patch >/dev/null"
 
       - name: Download Android NDK r30 and SDK build-tools (no emulator image)
         run: |
