@@ -36,14 +36,14 @@ jobs:
 
       - name: Restore patched Clang 21 cache
         id: cache-llvm
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/bo1-cache/llvm
           key: bo1-clang21-aarch64-v1-${{ hashFiles('tools/p32/clang-21-*.patch') }}
 
       - name: Restore Android deps cache (SDL2, FFmpeg, DXVK, libadrenotools)
         id: cache-deps
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/bo1-cache/deps
           key: bo1-android-deps-v1-${{ hashFiles('tools/native/build-dxvk.sh', 'tools/native/build-ffmpeg.sh', 'tools/native/build-adrenotools.sh', 'tools/native/android-setup.sh') }}
@@ -59,13 +59,13 @@ jobs:
             -v "${{ github.workspace }}:/bo1/src" \
             -v "${{ runner.temp }}/bo1-cache:/bo1-cache" \
             bo1-build
-          docker exec bo1-x64 bash -c "apt-get update -qq && apt-get install -y -qq --no-install-recommends patch >/dev/null"
+          docker exec bo1-x64 bash -c "apt-get update -qq && apt-get install -y -qq --no-install-recommends patch >/dev/null && chmod +x /bo1/src/tools/native/*.sh"
 
       - name: Download Android NDK r30 and SDK build-tools (no emulator image)
         run: |
           docker exec bo1-x64 bash -c '
             set -e
-            /bo1/src/tools/native/get-ndk.sh
+            bash /bo1/src/tools/native/get-ndk.sh
             rm -f /bo1/ndk/ndk-r30.zip
 
             A=/bo1/android
@@ -135,6 +135,13 @@ jobs:
             df -h /bo1
           '
 
+      - name: Save patched Clang 21 cache immediately
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/bo1-cache/llvm
+          key: bo1-clang21-aarch64-v1-${{ hashFiles('tools/p32/clang-21-*.patch') }}
+
       - name: Build or restore Android dependencies (SDL2, FFmpeg, DXVK, libadrenotools)
         run: |
           docker exec bo1-x64 bash -c '
@@ -171,14 +178,14 @@ jobs:
             rm -rf $A/sdl-build-arm64
 
             # 2. FFmpeg arm64-v8a (WMAv2 decoder)
-            JOBS=4 /bo1/src/tools/native/build-ffmpeg.sh arm64-v8a
+            JOBS=4 bash /bo1/src/tools/native/build-ffmpeg.sh arm64-v8a
             rm -rf /bo1/ffmpeg/build-*
 
             # 3. DXVK arm64-v8a (needs SDL2 built above)
-            JOBS=4 /bo1/src/tools/native/build-dxvk.sh arm64-v8a
+            JOBS=4 bash /bo1/src/tools/native/build-dxvk.sh arm64-v8a
 
             # 4. libadrenotools arm64-v8a
-            JOBS=4 /bo1/src/tools/native/build-adrenotools.sh
+            JOBS=4 bash /bo1/src/tools/native/build-adrenotools.sh
 
             # Save minimal dependency cache for fast future rebuilds
             rm -rf /bo1-cache/deps/*
@@ -198,6 +205,13 @@ jobs:
             chmod -R a+rX /bo1-cache/deps
             df -h /bo1
           '
+
+      - name: Save Android deps cache immediately
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/bo1-cache/deps
+          key: bo1-android-deps-v1-${{ hashFiles('tools/native/build-dxvk.sh', 'tools/native/build-ffmpeg.sh', 'tools/native/build-adrenotools.sh', 'tools/native/android-setup.sh') }}
 
       - name: Generate 32-bit-pointer tree (p32tree)
         run: |
@@ -223,7 +237,7 @@ jobs:
         run: |
           docker exec bo1-x64 bash -c '
             set -e
-            JOBS=4 /bo1/src/tools/native/build-android.sh
+            JOBS=4 bash /bo1/src/tools/native/build-android.sh
             B=/bo1/p32tree/build/android
             chmod -R a+rX /bo1/p32tree/build || true
             if [ ! -f "$B/bin/libbo1.so" ] || [ ! -f "$B/bin/libmain.so" ]; then
@@ -252,11 +266,11 @@ jobs:
             RELEASE_KEYSTORE=/tmp/bo1-release.p12 \
             RELEASE_ALIAS="$ALIAS" \
             RELEASE_PASS_FILE=/tmp/bo1-release.pass \
-            /bo1/src/tools/native/build-apk.sh
+            bash /bo1/src/tools/native/build-apk.sh
             rm -f /tmp/bo1-release.p12 /tmp/bo1-release.pass
           else
             echo "No release keystore secrets set; signing debug APK"
-            /bo1/src/tools/native/build-apk.sh
+            bash /bo1/src/tools/native/build-apk.sh
           fi
           chmod -R a+rX /bo1/android/out
           ls -lh /bo1/android/out/*.apk
