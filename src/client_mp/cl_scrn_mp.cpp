@@ -95,6 +95,8 @@ extern "C" double bo1_native_seconds(void);
 static void CL_DrawModFpsCounter()
 {
     static const dvar_t *bo1_fpscounter;
+    static const dvar_t *bo1_fps_x;
+    static const dvar_t *bo1_fps_y;
     static double lastFrame, windowStart;
     static int windowFrames;
     static float shownFps, low5, low1, averageMs, worstMs, cpu;
@@ -103,6 +105,10 @@ static void CL_DrawModFpsCounter()
     static int historyCount, historyNext;
     if (!bo1_fpscounter)
         bo1_fpscounter = _Dvar_RegisterInt("bo1_fpscounter", 0, 0, 3, 1u, "mod: FPS counter: 0 none, 1 FPS, 2 + lows and frame times, 3 + CPU and GPU use");
+    if (!bo1_fps_x)
+        bo1_fps_x = _Dvar_RegisterInt("bo1_fps_x", 48, 0, 1000, 1u, "mod: FPS counter horizontal margin (720p pixels)");
+    if (!bo1_fps_y)
+        bo1_fps_y = _Dvar_RegisterInt("bo1_fps_y", 14, 0, 1000, 1u, "mod: FPS counter vertical margin (720p pixels)");
     const int mode = bo1_fpscounter->current.integer;
     const double now = bo1_native_seconds();
     if (lastFrame > 0.0)
@@ -157,8 +163,8 @@ static void CL_DrawModFpsCounter()
     const float fontHeight = (float)R_TextHeight(font);
     const float line = 20.0f * screenH / 720.0f;
     const float scale = fontHeight > 0.0f ? line / fontHeight : 1.0f;
-    float y = 6.0f + line;
-    const float x = 8.0f;
+    float y = (float)bo1_fps_y->current.integer * screenH / 720.0f + line;
+    const float x = (float)bo1_fps_x->current.integer * screenH / 720.0f;
     R_AddCmdDrawText(va("%.0f FPS", shownFps), 0x7FFFFFFF, font, x, y, scale, scale, 0.0f, color, 3);
     if (mode >= 2)
     {

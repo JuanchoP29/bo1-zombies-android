@@ -26,6 +26,7 @@
 #include <cmath>
 #include <xanim/xanim.h>
 #include <client_mp/cl_cgame_mp.h>
+#include <client/gpad_core.h>
 
 AimAssistGlobals aaGlobArray[1];
 GraphFloat aaInputGraph[4];
@@ -33,6 +34,9 @@ GraphFloat aaInputGraph[4];
 const dvar_s *aim_aimAssistRangeScale;
 const dvar_s *aim_autoAimRangeScale;
 const dvar_s *aim_input_graph_enabled;
+#ifdef BO1_NATIVE
+static const dvar_t *bo1_aim_assist;
+#endif
 const dvar_s *aim_input_graph_debug;
 const dvar_s *aim_input_graph_index;
 const dvar_s *aim_turnrate_pitch;
@@ -254,7 +258,12 @@ void AimAssist_RegisterDvars()
                                              100.0,
                                              0x1080u,
                                              "The rate in degrees per second that the auto aim will converge to its target");
+#ifdef BO1_NATIVE
+    bo1_aim_assist = _Dvar_RegisterBool("bo1_aim_assist", 1, 1u, "mod: enable console aim assist while using a gamepad");
+    aim_autoaim_enabled = _Dvar_RegisterBool("aim_autoaim_enabled", 1, 0x1000u, "Turn on auto aim");
+#else
     aim_autoaim_enabled = _Dvar_RegisterBool("aim_autoaim_enabled", 0, 0x1080u, "Turn on auto aim");
+#endif
     aim_autoaim_debug = _Dvar_RegisterBool("aim_autoaim_debug", 0, 0x1080u, "Turn on auto aim debugging");
     aim_autoaim_region_width = _Dvar_RegisterFloat(
                                                              "aim_autoaim_region_width",
@@ -308,11 +317,19 @@ void AimAssist_RegisterDvars()
                                                                         5.0,
                                                                         0x1000u,
                                                                         "override value for view sensitivity");
+#ifdef BO1_NATIVE
+    aim_lockon_enabled = _Dvar_RegisterBool(
+                                                 "aim_lockon_enabled",
+                                                 1,
+                                                 0x1000u,
+                                                 "Aim lock on helps the player to stay on target");
+#else
     aim_lockon_enabled = _Dvar_RegisterBool(
                                                  "aim_lockon_enabled",
                                                  0,
                                                  0x1080u,
                                                  "Aim lock on helps the player to stay on target");
+#endif
     aim_lockon_debug = _Dvar_RegisterBool("aim_lockon_debug", 0, 0x1080u, "Turn on debugging info for aim lock on");
     aim_lockon_deflection = _Dvar_RegisterFloat(
                                                         "aim_lockon_deflection",
@@ -518,6 +535,10 @@ centity_s *__cdecl CG_GetEntity(int localClientNum, int entityIndex)
 char __cdecl AimAssist_PlayerDisabledAutoAim()
 {
     Demo_IsPlaying();
+#ifdef BO1_NATIVE
+    if ( gpad_enabled && gpad_enabled->current.enabled && (!bo1_aim_assist || bo1_aim_assist->current.enabled) )
+        return 0;
+#endif
     return 1;
 }
 

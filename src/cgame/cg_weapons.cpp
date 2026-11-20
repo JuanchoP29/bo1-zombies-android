@@ -38,6 +38,7 @@
 #include <gfx_d3d/r_dpvs.h>
 #include <server_mp/sv_init_mp.h>
 #include <cgame_mp/cg_pose_mp.h>
+#include <client/gpad_core.h>
 #include <game/g_debug.h>
 #include "cg_world.h"
 #include "cg_sp_client_ext.h"
@@ -5128,6 +5129,25 @@ void __cdecl CG_FireWeapon(
             CG_UpdateViewModelPose(viewModelInfo->viewModelDObj, (int)localClientNum);
             BG_WeaponFireRecoil(&cgameGlob->predictedPlayerState, cgameGlob->recoilSpeed, cgameGlob->kickAVel);
             CG_SP_FeelTraceKick((int)localClientNum, 2); // w1 TEST SWITCH bo1_feeltrace (headless client only)
+#ifdef BO1_NATIVE
+            if ( weaponDef->fireRumble && weaponDef->fireRumble[0] )
+            {
+                GPad_Rumble_Play(weaponDef->fireRumble, false);
+            }
+            else
+            {
+                const char *fallbackRumble = "fire";
+                if ( weaponDef->weapClass == WEAPCLASS_PISTOL )
+                    fallbackRumble = "pistol_fire";
+                else if ( weaponDef->weapClass == WEAPCLASS_SPREAD )
+                    fallbackRumble = "shotgun_fire";
+                else if ( weaponDef->weapClass == WEAPCLASS_MG )
+                    fallbackRumble = "lmg_fire";
+                else if ( weaponDef->weapClass == WEAPCLASS_ROCKETLAUNCHER )
+                    fallbackRumble = "explosion";
+                GPad_Rumble_Play(fallbackRumble, false);
+            }
+#endif
         }
         CG_FireWeapon_VehicleFire((int)localClientNum, cent, ps, event, tagName);
         //BLOPS_NULLSUB();

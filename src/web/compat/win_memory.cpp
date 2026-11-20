@@ -9,7 +9,9 @@
 #include <psapi.h>
 #include "bo1_platform.h"
 #include <malloc.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <cstring>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -215,10 +217,41 @@ static void HeapNumbers(uint64_t *total, uint64_t *avail)
 {
     *total = bo1_plat_memory_total();
 #ifdef BO1_NATIVE
-    // native: free physical memory, at most the total the engine is told about
-    const long pages = sysconf(_SC_AVPHYS_PAGES), pageSize = sysconf(_SC_PAGESIZE);
-    const uint64_t freePhys = pages > 0 && pageSize > 0 ? (uint64_t)pages * (uint64_t)pageSize : *total;
-    *avail = freePhys < *total ? freePhys : *total;
+    // mod (custom): read MemAvailable from /proc/meminfo (includes reclaimable page cache on Android/Linux);
+    // fall back to sysconf(_SC_AVPHYS_PAGES) only if /proc/meminfo is unavailable.
+    uint64_t availPhys = 0;
+    const int memfd = open("/proc/meminfo", O_RDONLY);
+    if (memfd >= 0)
+    {
+        char buf[512];
+        const ssize_t n = read(memfd, buf, sizeof(buf) - 1);
+        close(memfd);
+        if (n > 0)
+        {
+            buf[n] = '\0';
+            const char *p = strstr(buf, "MemAvailable:");
+            if (p)
+            {
+                p += 13;
+                while (*p == ' ' || *p == '\t')
+                    ++p;
+                uint64_t kb = 0;
+                while (*p >= '0' && *p <= '9')
+                {
+                    kb = kb * 10 + (uint64_t)(*p - '0');
+                    ++p;
+                }
+                if (kb > 0)
+                    availPhys = kb * 1024ULL;
+            }
+        }
+    }
+    if (availPhys == 0)
+    {
+        const long pages = sysconf(_SC_AVPHYS_PAGES), pageSize = sysconf(_SC_PAGESIZE);
+        availPhys = pages > 0 && pageSize > 0 ? (uint64_t)pages * (uint64_t)pageSize : *total;
+    }
+    *avail = availPhys < *total ? availPhys : *total;
 #else
     const uint64_t used = (uint64_t)(uintptr_t)sbrk(0);
     *avail = *total > used ? *total - used : 0;

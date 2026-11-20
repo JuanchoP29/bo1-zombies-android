@@ -38,6 +38,7 @@
 #include "cg_spawn.h"
 #include "cg_bolt.h"
 #include <bgame/bg_wind.h>
+#include <client/gpad_core.h>
 #include <client_mp/cl_ui_mp.h>
 #include <cgame_mp/cg_scoreboard_mp.h>
 #include <cgame_mp/cg_draw_mp.h>
@@ -721,13 +722,29 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                     return;
                 case EV_RELOAD:
                     if (isPlayerView)
+                    {
+#ifdef BO1_NATIVE
+                        if (weaponDef->reloadRumble && weaponDef->reloadRumble[0])
+                            GPad_Rumble_Play(weaponDef->reloadRumble, false);
+                        else
+                            GPad_Rumble_Play("reload", false);
+#endif
                         v7 = SND_FindAliasId((char *)weaponDef->reloadSoundPlayer);
+                    }
                     else
                         v7 = SND_FindAliasId((char *)weaponDef->reloadSound);
                     goto LABEL_570;
                 case EV_RELOAD_FROM_EMPTY:
                     if (isPlayerView)
+                    {
+#ifdef BO1_NATIVE
+                        if (weaponDef->reloadRumble && weaponDef->reloadRumble[0])
+                            GPad_Rumble_Play(weaponDef->reloadRumble, false);
+                        else
+                            GPad_Rumble_Play("reload", false);
+#endif
                         v7 = SND_FindAliasId((char *)weaponDef->reloadEmptySoundPlayer);
+                    }
                     else
                         v7 = SND_FindAliasId((char *)weaponDef->reloadEmptySound);
                     goto LABEL_570;
@@ -922,6 +939,15 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                     {
                         CG_PlaySound(localClientNum, p_nextState->otherEntityNum, 0, 0, 0, 1.0, cgMedia.meleeHit);
                     }
+#ifdef BO1_NATIVE
+                    if (isPlayerView)
+                    {
+                        if (meleeWeaponDef && meleeWeaponDef->meleeImpactRumble && meleeWeaponDef->meleeImpactRumble[0])
+                            GPad_Rumble_Play(meleeWeaponDef->meleeImpactRumble, false);
+                        else
+                            GPad_Rumble_Play("melee", false);
+                    }
+#endif
                     return;
                 case EV_MELEE_MISS:
                     if (p_nextState->eventParm == 2)

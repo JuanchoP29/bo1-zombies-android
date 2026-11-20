@@ -1,0 +1,279 @@
+name: Build Custom Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'android/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'cmake_files.cmake'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Free disk space on runner
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/.ghcup || true
+          docker system prune -af || true
+          df -h
+
+      - name: Checkout fork
+        uses: actions/checkout@v4
+
+      - name: Prepare host work directory
+        run: |
+          mkdir -p "${{ runner.temp }}/bo1"
+          mkdir -p "${{ runner.temp }}/bo1-cache/llvm"
+          mkdir -p "${{ runner.temp }}/bo1-cache/deps"
+
+      - name: Restore patched Clang 21 cache
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bo1-cache/llvm
+          key: bo1-clang21-aarch64-v1-${{ hashFiles('tools/p32/clang-21-*.patch') }}
+
+      - name: Restore Android deps cache (SDL2, FFmpeg, DXVK, libadrenotools)
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bo1-cache/deps
+          key: bo1-android-deps-v1-${{ hashFiles('tools/native/build-dxvk.sh', 'tools/native/build-ffmpeg.sh', 'tools/native/build-adrenotools.sh', 'tools/native/android-setup.sh') }}
+
+      - name: Build Debian 13 build container image
+        run: |
+          docker build -t bo1-build tools/native/docker
+
+      - name: Start build container
+        run: |
+          docker run -d --name bo1-x64 \
+            -v "${{ runner.temp }}/bo1:/bo1" \
+            -v "${{ github.workspace }}:/bo1/src" \
+            -v "${{ runner.temp }}/bo1-cache:/bo1-cache" \
+            bo1-build
+
+      - name: Download Android NDK r30 and SDK build-tools (no emulator image)
+        run: |
+          docker exec bo1-x64 bash -c '
+            set -e
+            /bo1/src/tools/native/get-ndk.sh
+            rm -f /bo1/ndk/ndk-r30.zip
+
+            A=/bo1/android
+            mkdir -p $A/dl $A/sdk
+            cd $A/dl
+            curl -sSfL -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            mkdir -p $A/sdk/cmdline-tools
+            unzip -q cmdline-tools.zip -d $A/sdk/cmdline-tools
+            mv $A/sdk/cmdline-tools/cmdline-tools $A/sdk/cmdline-tools/latest
+            rm -f cmdline-tools.zip
+
+            SM="$A/sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$A/sdk"
+            yes | $SM --licenses > $A/licenses.log 2>&1 || true
+            $SM "build-tools;35.0.0" "platforms;android-35" > $A/sdkmanager.log 2>&1
+            ls -la $A/sdk/build-tools/35.0.0/apksigner $A/sdk/platforms/android-35/android.jar
+          '
+
+      - name: Build or restore patched Clang 21 (AArch64)
+        run: |
+          docker exec bo1-x64 bash -c '
+            set -e
+            if [ -x /bo1-cache/llvm/bin/clang ]; then
+              echo "Restoring patched Clang 21 from cache..."
+              mkdir -p /bo1/llvm/build
+              cp -a /bo1-cache/llvm/. /bo1/llvm/build/
+              /bo1/llvm/build/bin/clang --version | head -1
+              exit 0
+            fi
+
+            L=/bo1/llvm; V=21.1.8; mkdir -p $L; cd $L
+            curl -sSfL -o llvm-project-$V.src.tar.xz \
+              https://github.com/llvm/llvm-project/releases/download/llvmorg-$V/llvm-project-$V.src.tar.xz
+            tar xf llvm-project-$V.src.tar.xz
+            rm -f llvm-project-$V.src.tar.xz
+            for p in /bo1/src/tools/p32/clang-21-x86_64-ptr32-abi.patch /bo1/src/tools/p32/clang-21-aarch64-ptr32-truncstore.patch; do
+              patch -d llvm-project-$V.src -p1 < $p
+            done
+
+            cmake -S llvm-project-$V.src/llvm -B build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DLLVM_ENABLE_PROJECTS=clang \
+              -DLLVM_TARGETS_TO_BUILD=AArch64 \
+              -DLLVM_INCLUDE_TESTS=OFF \
+              -DLLVM_INCLUDE_EXAMPLES=OFF \
+              -DLLVM_INCLUDE_BENCHMARKS=OFF \
+              -DCLANG_INCLUDE_TESTS=OFF \
+              -DLLVM_ENABLE_ASSERTIONS=OFF \
+              -DCMAKE_C_COMPILER=clang-21 \
+              -DCMAKE_CXX_COMPILER=clang++-21 \
+              -DLLVM_USE_LINKER=lld \
+              -DLLVM_PARALLEL_LINK_JOBS=1 \
+              -DLLVM_ENABLE_ZSTD=OFF \
+              -DLLVM_ENABLE_LIBXML2=OFF \
+              -DLLVM_ENABLE_TERMINFO=OFF
+
+            ninja -C build -j 4 clang clang-resource-headers
+            build/bin/clang --version | head -1
+
+            # Keep only minimal compiler binaries + headers (~150 MB) and free ~15 GB immediately
+            mkdir -p /bo1-cache/llvm/bin /bo1-cache/llvm/lib/clang/21
+            cp -a build/bin/clang* /bo1-cache/llvm/bin/
+            cp -a build/lib/clang/21/include /bo1-cache/llvm/lib/clang/21/
+            rm -rf /bo1/llvm/llvm-project-$V.src /bo1/llvm/build
+            mkdir -p /bo1/llvm/build
+            cp -a /bo1-cache/llvm/. /bo1/llvm/build/
+            chmod -R a+rX /bo1-cache/llvm
+            df -h /bo1
+          '
+
+      - name: Build or restore Android dependencies (SDL2, FFmpeg, DXVK, libadrenotools)
+        run: |
+          docker exec bo1-x64 bash -c '
+            set -e
+            if [ -f /bo1-cache/deps/.ready ]; then
+              echo "Restoring Android dependencies from cache..."
+              mkdir -p /bo1/android /bo1/ffmpeg /bo1/dxvk /bo1/adrenotools
+              cp -a /bo1-cache/deps/android/. /bo1/android/
+              cp -a /bo1-cache/deps/ffmpeg/. /bo1/ffmpeg/
+              cp -a /bo1-cache/deps/dxvk/. /bo1/dxvk/
+              cp -a /bo1-cache/deps/adrenotools/. /bo1/adrenotools/
+              exit 0
+            fi
+
+            # 1. SDL2 source + arm64-v8a build
+            A=/bo1/android; mkdir -p $A/dl; cd $A/dl
+            for v in 2.32.10 2.32.8 2.32.6 2.30.12; do
+              [ -d $A/SDL2 ] && break
+              curl -sSfL -o SDL2.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-$v/SDL2-$v.tar.gz \
+                && tar xf SDL2.tar.gz -C $A && mv $A/SDL2-$v $A/SDL2 && rm -f SDL2.tar.gz && echo "SDL2 $v"
+            done
+            NDK=/bo1/ndk/ndk-r30/android-ndk-r30
+            cmake -S $A/SDL2 -B $A/sdl-build-arm64 -G Ninja \
+              -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+              -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+              -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_TEST=OFF
+            ninja -C $A/sdl-build-arm64 -j 4
+            mkdir -p $A/sdl/include/SDL2 $A/sdl/lib
+            cp $A/SDL2/include/*.h $A/sdl/include/SDL2/
+            cp $A/sdl-build-arm64/include-config-release/SDL2/SDL_config.h $A/sdl/include/SDL2/ 2>/dev/null \
+              || cp $A/sdl-build-arm64/include/SDL2/SDL_config.h $A/sdl/include/SDL2/ 2>/dev/null \
+              || cp $A/SDL2/include/SDL_config_android.h $A/sdl/include/SDL2/SDL_config.h
+            cp $A/sdl-build-arm64/libSDL2.so $A/sdl/lib/
+            rm -rf $A/sdl-build-arm64
+
+            # 2. FFmpeg arm64-v8a (WMAv2 decoder)
+            JOBS=4 /bo1/src/tools/native/build-ffmpeg.sh arm64-v8a
+            rm -rf /bo1/ffmpeg/build-*
+
+            # 3. DXVK arm64-v8a (needs SDL2 built above)
+            JOBS=4 /bo1/src/tools/native/build-dxvk.sh arm64-v8a
+
+            # 4. libadrenotools arm64-v8a
+            JOBS=4 /bo1/src/tools/native/build-adrenotools.sh
+
+            # Save minimal dependency cache for fast future rebuilds
+            rm -rf /bo1-cache/deps/*
+            mkdir -p /bo1-cache/deps/android/SDL2 /bo1-cache/deps/ffmpeg/src /bo1-cache/deps/dxvk/src /bo1-cache/deps/dxvk/build-android-arm64-v8a/src/d3d9 /bo1-cache/deps/adrenotools/src /bo1-cache/deps/adrenotools/build/src/hook
+            cp -a /bo1/android/sdl /bo1-cache/deps/android/
+            cp -a /bo1/android/SDL2/android-project /bo1-cache/deps/android/SDL2/
+            cp -a /bo1/android/SDL2/LICENSE.txt /bo1-cache/deps/android/SDL2/
+            cp -a /bo1/ffmpeg/android-arm64-v8a /bo1-cache/deps/ffmpeg/
+            cp -a /bo1/ffmpeg/src/COPYING.LGPLv2.1 /bo1-cache/deps/ffmpeg/src/
+            cp -a /bo1/dxvk/src/include /bo1-cache/deps/dxvk/src/
+            cp -a /bo1/dxvk/src/LICENSE /bo1-cache/deps/dxvk/src/
+            cp -a /bo1/dxvk/build-android-arm64-v8a/src/d3d9/libdxvk_d3d9.so /bo1-cache/deps/dxvk/build-android-arm64-v8a/src/d3d9/
+            cp -a /bo1/adrenotools/src/LICENSE /bo1-cache/deps/adrenotools/src/
+            cp -a /bo1/adrenotools/build/libadrenotools.so /bo1-cache/deps/adrenotools/build/
+            cp -a /bo1/adrenotools/build/src/hook/lib*.so /bo1-cache/deps/adrenotools/build/src/hook/
+            touch /bo1-cache/deps/.ready
+            chmod -R a+rX /bo1-cache/deps
+            df -h /bo1
+          '
+
+      - name: Generate 32-bit-pointer tree (p32tree)
+        run: |
+          docker exec bo1-x64 bash -c '
+            set -e
+            cd /bo1/src
+            DXVK=/bo1/dxvk/src
+            FFMPEG=/bo1/ffmpeg/android-arm64-v8a
+            DB=build/native-x64
+            cmake -S . -B $DB -G Ninja \
+              -DBO1_NATIVE=ON -DBO1_NATIVE_ARCH=x64 \
+              -DBO1_NATIVE_DXVK=$DXVK -DBO1_NATIVE_FFMPEG=$FFMPEG \
+              -DCMAKE_C_COMPILER=clang-21 -DCMAKE_CXX_COMPILER=clang++-21 \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+            clang++-21 -std=c++17 -O1 -fno-rtti tools/p32/p32rewrite.cpp -o $DB/p32rewrite \
+              $(llvm-config-21 --cxxflags | sed "s/-std=[^ ]*//") \
+              -I/usr/lib/llvm-21/include -L/usr/lib/llvm-21/lib -lclang-cpp -lLLVM-21
+            python3 tools/p32/p32tree.py --db $DB --out /bo1/p32tree --jobs 4
+            rm -rf $DB
+          '
+
+      - name: Compile Android arm64-v8a engine (libbo1.so + libmain.so)
+        run: |
+          docker exec bo1-x64 bash -c '
+            set -e
+            JOBS=4 /bo1/src/tools/native/build-android.sh
+            B=/bo1/p32tree/build/android
+            chmod -R a+rX /bo1/p32tree/build || true
+            if [ ! -f "$B/bin/libbo1.so" ] || [ ! -f "$B/bin/libmain.so" ]; then
+              echo "=== Engine build failed! Showing first 80 error lines ==="
+              grep -n "error:" "$B/build.log" | head -80
+              exit 1
+            fi
+            ls -lh "$B/bin/libbo1.so" "$B/bin/libmain.so"
+          '
+
+      - name: Package and sign APK
+        env:
+          BO1_KEYSTORE_B64: ${{ secrets.BO1_KEYSTORE_B64 }}
+          BO1_KEYSTORE_PASS: ${{ secrets.BO1_KEYSTORE_PASS }}
+        run: |
+          docker exec -i \
+            -e BO1_KEYSTORE_B64="$BO1_KEYSTORE_B64" \
+            -e BO1_KEYSTORE_PASS="$BO1_KEYSTORE_PASS" \
+            bo1-x64 bash <<'EOF'
+          set -e
+          if [ -n "$BO1_KEYSTORE_B64" ] && [ -n "$BO1_KEYSTORE_PASS" ]; then
+            printf '%s' "$BO1_KEYSTORE_B64" | base64 -d > /tmp/bo1-release.p12
+            printf '%s\n' "$BO1_KEYSTORE_PASS" > /tmp/bo1-release.pass
+            ALIAS=$(keytool -list -keystore /tmp/bo1-release.p12 -storepass "$BO1_KEYSTORE_PASS" -storetype PKCS12 | awk -F, '/PrivateKeyEntry/{print $1; exit}')
+            echo "Signing release APK with keystore alias: $ALIAS"
+            RELEASE_KEYSTORE=/tmp/bo1-release.p12 \
+            RELEASE_ALIAS="$ALIAS" \
+            RELEASE_PASS_FILE=/tmp/bo1-release.pass \
+            /bo1/src/tools/native/build-apk.sh
+            rm -f /tmp/bo1-release.p12 /tmp/bo1-release.pass
+          else
+            echo "No release keystore secrets set; signing debug APK"
+            /bo1/src/tools/native/build-apk.sh
+          fi
+          chmod -R a+rX /bo1/android/out
+          ls -lh /bo1/android/out/*.apk
+          EOF
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            ${{ runner.temp }}/bo1/p32tree/build/android/build.log
+            ${{ runner.temp }}/bo1/p32tree/build/android.configure.log
+          if-no-files-found: ignore
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bo1-port-custom-apk
+          path: ${{ runner.temp }}/bo1/android/out/*.apk
+          retention-days: 30
