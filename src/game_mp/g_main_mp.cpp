@@ -3145,11 +3145,18 @@ void __cdecl G_UpdateClientLinkInfo(gentity_s *ent)
                                                      + (float)(entParent->s.lerp.apos.trDelta[1] * entParent->s.lerp.apos.trDelta[1]))
                                      + (float)(entParent->s.lerp.apos.trDelta[2] * entParent->s.lerp.apos.trDelta[2])) != 0.0 )
                 {
-                    Com_PrintWarning(
-                        15,
-                        "Ent #%i of type %i is SVF_NOCLIENT, but has children and seems to be moving.    There is a potential optimization here.\n",
-                        ent->s.number,
-                        ent->s.eType);
+                    // Rate-limit to once per entity to eliminate 20 Hz FUSE log spam during gameplay.
+                    static unsigned int s_noclientWarned[32];
+                    const unsigned int entNum = (unsigned int)ent->s.number;
+                    if ( entNum < 1024u && !(s_noclientWarned[entNum >> 5] & (1u << (entNum & 31u))) )
+                    {
+                        s_noclientWarned[entNum >> 5] |= (1u << (entNum & 31u));
+                        Com_PrintWarning(
+                            15,
+                            "Ent #%i of type %i is SVF_NOCLIENT, but has children and seems to be moving.    There is a potential optimization here.\n",
+                            ent->s.number,
+                            ent->s.eType);
+                    }
                 }
                 ent->s.clientLinkInfo.parentEnt = 0;
             }

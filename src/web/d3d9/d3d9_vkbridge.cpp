@@ -45,37 +45,74 @@ static HRESULT NotImplemented(const char *method)
 #define VK_NOTIMPL(name) return NotImplemented(name)
 
 // One lock's memory: DXVK's address itself, or a low stand-in copied from / to it.
+// Dynamic resources (D3DUSAGE_DYNAMIC vertex/index buffers and textures such as Bink YUV planes) keep
+// their staging buffer across locks (up to kRetainMax) so hot per-frame locks avoid malloc/free churn.
+// Static resources (uploaded once at map load) free immediately on End(false) to avoid holding lowmem.
 struct Bounce
 {
+    static constexpr size_t kRetainMax = 4u * 1024u * 1024u;
     void *shadow = nullptr;
+    size_t shadowCap = 0;
     bo1vk_p native = 0;
     uint64_t bytes = 0;
+    bool active = false;
     bool writeBack = false;
+
+    Bounce() = default;
+    Bounce(const Bounce &) = delete;
+    Bounce &operator=(const Bounce &) = delete;
+    ~Bounce()
+    {
+        if (shadow)
+        {
+            free(shadow);
+            shadow = nullptr;
+            shadowCap = 0;
+        }
+    }
 
     void *Begin(bo1vk_p address, uint64_t size, bool copyIn, bool write)
     {
-        End();
+        End(true);
         native = address;
         bytes = size;
         writeBack = write;
         if (!(address >> 32) && !((address + size) >> 32))
             return (void *)(uintptr_t)address;
-        shadow = malloc(size ? (size_t)size : 1);
-        if (!shadow)
-            return nullptr;
-        if (copyIn)
+        const size_t need = size ? (size_t)size : 1u;
+        if (need > shadowCap)
+        {
+            if (shadow)
+            {
+                free(shadow);
+                shadow = nullptr;
+                shadowCap = 0;
+            }
+            shadow = malloc(need);
+            if (!shadow)
+                return nullptr;
+            shadowCap = need;
+        }
+        active = true;
+        if (copyIn && size)
             bo1vk_copy(P(shadow), address, size);
         return shadow;
     }
 
-    void End()
+    void End(bool retain = false)
     {
-        if (!shadow)
-            return;
-        if (writeBack)
-            bo1vk_copy(native, P(shadow), bytes);
-        free(shadow);
-        shadow = nullptr;
+        if (active)
+        {
+            active = false;
+            if (writeBack && bytes)
+                bo1vk_copy(native, P(shadow), bytes);
+        }
+        if (shadow && (!retain || shadowCap > kRetainMax))
+        {
+            free(shadow);
+            shadow = nullptr;
+            shadowCap = 0;
+        }
     }
 };
 
@@ -161,7 +198,12 @@ public:
             return hr;
         locked->Pitch = pitch;
         locked->pBits = lock.Begin(bits, bytes, LockCopiesIn(flags), LockWritesBack(flags));
-        return locked->pBits ? hr : E_OUTOFMEMORY;
+        if (!locked->pBits)
+        {
+            bo1vk_tex_unlock(n, BO1VK_SURFACE, 0, 0);
+            return E_OUTOFMEMORY;
+        }
+        return hr;
     }
     HRESULT UnlockRect() override
     {
@@ -195,6 +237,7 @@ struct LevelLocks
 class Texture : public BaseTexture<IDirect3DTexture9, D3DRTYPE_TEXTURE>
 {
 public:
+    DWORD usage = 0;
     LevelLocks locks;
 
     HRESULT GetLevelDesc(UINT level, D3DSURFACE_DESC *desc) override { return bo1vk_tex_desc(n, BO1VK_TEX2D, level, P(desc)); }
@@ -216,11 +259,16 @@ public:
             return hr;
         locked->Pitch = pitch;
         locked->pBits = locks.At(0, level).Begin(bits, bytes, LockCopiesIn(flags), LockWritesBack(flags));
-        return locked->pBits ? hr : E_OUTOFMEMORY;
+        if (!locked->pBits)
+        {
+            bo1vk_tex_unlock(n, BO1VK_TEX2D, 0, level);
+            return E_OUTOFMEMORY;
+        }
+        return hr;
     }
     HRESULT UnlockRect(UINT level) override
     {
-        locks.At(0, level).End();
+        locks.At(0, level).End((usage & D3DUSAGE_DYNAMIC) != 0);
         return bo1vk_tex_unlock(n, BO1VK_TEX2D, 0, level);
     }
     HRESULT AddDirtyRect(const RECT *rect) override { return bo1vk_tex_dirty(n, BO1VK_TEX2D, 0, P(rect)); }
@@ -251,7 +299,12 @@ public:
             return hr;
         locked->Pitch = pitch;
         locked->pBits = locks.At((unsigned)face, level).Begin(bits, bytes, LockCopiesIn(flags), LockWritesBack(flags));
-        return locked->pBits ? hr : E_OUTOFMEMORY;
+        if (!locked->pBits)
+        {
+            bo1vk_tex_unlock(n, BO1VK_CUBE, (uint32_t)face, level);
+            return E_OUTOFMEMORY;
+        }
+        return hr;
     }
     HRESULT UnlockRect(D3DCUBEMAP_FACES face, UINT level) override
     {
@@ -283,7 +336,12 @@ public:
         locked->RowPitch = rowPitch;
         locked->SlicePitch = slicePitch;
         locked->pBits = locks.At(0, level).Begin(bits, bytes, LockCopiesIn(flags), LockWritesBack(flags));
-        return locked->pBits ? hr : E_OUTOFMEMORY;
+        if (!locked->pBits)
+        {
+            bo1vk_vol_unlock(n, level);
+            return E_OUTOFMEMORY;
+        }
+        return hr;
     }
     HRESULT UnlockBox(UINT level) override
     {
@@ -317,11 +375,16 @@ public:
         // a range that is appended to (NOOVERWRITE) is written whole by the engine; nothing to read first
         const bool copyIn = LockCopiesIn(flags) && !((flags & D3DLOCK_NOOVERWRITE) && size);
         *data = lock.Begin(address, bytes, copyIn, LockWritesBack(flags));
-        return *data ? hr : E_OUTOFMEMORY;
+        if (!*data)
+        {
+            bo1vk_buf_unlock(this->n, IsIndex);
+            return E_OUTOFMEMORY;
+        }
+        return hr;
     }
     HRESULT Unlock() override
     {
-        lock.End();
+        lock.End((usage & D3DUSAGE_DYNAMIC) != 0);
         return bo1vk_buf_unlock(this->n, IsIndex);
     }
 };
@@ -573,6 +636,8 @@ public:
         const HRESULT hr = bo1vk_dev_create_texture(n, width, height, levels, usage, (uint32_t)format,
             (uint32_t)pool, P(&native));
         Texture *texture = Wrap<Texture>(hr, native);
+        if (texture)
+            texture->usage = usage;
         *out = texture;
         return hr;
     }

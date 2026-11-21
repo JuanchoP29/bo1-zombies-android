@@ -5946,9 +5946,15 @@ void     RB_RenderThread(unsigned int threadContext)
             }
             r_glob.screenUpdateNotify = 1;
         }
-        else
+        else if ( Sys_WaitBackendEvent(1) )
         {
-            NET_Sleep(1u);
+            data = (GfxBackEndData *)Sys_RendererSleep();
+            if (data)
+            {
+                RB_UpdateDynamicBuffers((GfxBackEndData*)data);
+                RB_RenderCommandFrame((GfxBackEndData *)data);
+            }
+            data = 0;
         }
     }
 }

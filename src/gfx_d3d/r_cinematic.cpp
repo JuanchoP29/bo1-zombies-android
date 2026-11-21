@@ -163,58 +163,70 @@ void __cdecl Unlock_Bink_textures2(IDirect3DDevice9 *d3d_device, BINKTEXTURESET 
     BINKFRAMEPLANESET *bp_src; // [esp+24h] [ebp-Ch]
     _D3DLOCKED_RECT lr; // [esp+28h] [ebp-8h] BYREF
 
+    if (!set_textures || set_textures->bink_buffers.FrameNum >= BINKMAXFRAMEBUFFERS)
+        return;
+
     bp_src = &set_textures->bink_buffers.Frames[set_textures->bink_buffers.FrameNum];
-    set_textures->tex_draw.Ytexture->LockRect(0, &lr, 0, 0x2000u);
     srcWidth = set_textures->bink_buffers.YABufferWidth;
     srcHeight = set_textures->bink_buffers.YABufferHeight;
     srcBits = (unsigned __int8 *)bp_src->YPlane.Buffer;
-    dstBits = (char *)lr.pBits;
-    if (lr.Pitch == srcWidth)
+    if (set_textures->tex_draw.Ytexture && srcBits && srcWidth > 0 && srcHeight > 0
+        && SUCCEEDED(set_textures->tex_draw.Ytexture->LockRect(0, &lr, 0, 0x2000u)) && lr.pBits)
     {
-        memcpy((unsigned __int8 *)lr.pBits, srcBits, srcHeight * srcWidth);
+        dstBits = (char *)lr.pBits;
+        if (lr.Pitch == srcWidth)
+        {
+            memcpy((unsigned __int8 *)lr.pBits, srcBits, srcHeight * srcWidth);
+        }
+        else
+        {
+            for (i = 0; i < srcHeight; ++i)
+                memcpy((unsigned __int8 *)&dstBits[lr.Pitch * i], &srcBits[srcWidth * i], srcWidth);
+        }
+        set_textures->tex_draw.Ytexture->UnlockRect(0);
     }
-    else
-    {
-        for (i = 0; i < srcHeight; ++i)
-            memcpy((unsigned __int8 *)&dstBits[lr.Pitch * i], &srcBits[srcWidth * i], srcWidth);
-    }
-    set_textures->tex_draw.Ytexture->UnlockRect(0);
-    set_textures->tex_draw.cRtexture->LockRect(0, &lr, 0, 0x2000u);
     srcWidtha = set_textures->bink_buffers.cRcBBufferWidth;
     srcHeighta = set_textures->bink_buffers.cRcBBufferHeight;
     srcBitsa = (unsigned __int8 *)bp_src->cRPlane.Buffer;
-    dstBitsa = (char *)lr.pBits;
-    if (lr.Pitch == srcWidtha)
+    if (set_textures->tex_draw.cRtexture && srcBitsa && srcWidtha > 0 && srcHeighta > 0
+        && SUCCEEDED(set_textures->tex_draw.cRtexture->LockRect(0, &lr, 0, 0x2000u)) && lr.pBits)
     {
-        memcpy((unsigned __int8 *)lr.pBits, srcBitsa, srcHeighta * srcWidtha);
+        dstBitsa = (char *)lr.pBits;
+        if (lr.Pitch == srcWidtha)
+        {
+            memcpy((unsigned __int8 *)lr.pBits, srcBitsa, srcHeighta * srcWidtha);
+        }
+        else
+        {
+            for (j = 0; j < srcHeighta; ++j)
+                memcpy((unsigned __int8 *)&dstBitsa[lr.Pitch * j], &srcBitsa[srcWidtha * j], srcWidtha);
+        }
+        set_textures->tex_draw.cRtexture->UnlockRect(0);
     }
-    else
-    {
-        for (j = 0; j < srcHeighta; ++j)
-            memcpy((unsigned __int8 *)&dstBitsa[lr.Pitch * j], &srcBitsa[srcWidtha * j], srcWidtha);
-    }
-    set_textures->tex_draw.cRtexture->UnlockRect(0);
-    set_textures->tex_draw.cBtexture->LockRect(0, &lr, 0, 0x2000u);
     srcWidthb = set_textures->bink_buffers.cRcBBufferWidth;
     srcHeightb = set_textures->bink_buffers.cRcBBufferHeight;
     srcBitsb = (unsigned __int8 *)bp_src->cBPlane.Buffer;
-    dstBitsb = (char *)lr.pBits;
-    if (lr.Pitch == srcWidthb)
+    if (set_textures->tex_draw.cBtexture && srcBitsb && srcWidthb > 0 && srcHeightb > 0
+        && SUCCEEDED(set_textures->tex_draw.cBtexture->LockRect(0, &lr, 0, 0x2000u)) && lr.pBits)
     {
-        memcpy((unsigned __int8 *)lr.pBits, srcBitsb, srcHeightb * srcWidthb);
+        dstBitsb = (char *)lr.pBits;
+        if (lr.Pitch == srcWidthb)
+        {
+            memcpy((unsigned __int8 *)lr.pBits, srcBitsb, srcHeightb * srcWidthb);
+        }
+        else
+        {
+            for (k = 0; k < srcHeightb; ++k)
+                memcpy((unsigned __int8 *)&dstBitsb[lr.Pitch * k], &srcBitsb[srcWidthb * k], srcWidthb);
+        }
+        set_textures->tex_draw.cBtexture->UnlockRect(0);
     }
-    else
+    srcWidthc = set_textures->bink_buffers.YABufferWidth;
+    srcHeightc = set_textures->bink_buffers.YABufferHeight;
+    srcBitsc = (unsigned __int8 *)bp_src->APlane.Buffer;
+    if (set_textures->tex_draw.Atexture && srcBitsc && srcWidthc > 0 && srcHeightc > 0
+        && SUCCEEDED(set_textures->tex_draw.Atexture->LockRect(0, &lr, 0, 0x2000u)) && lr.pBits)
     {
-        for (k = 0; k < srcHeightb; ++k)
-            memcpy((unsigned __int8 *)&dstBitsb[lr.Pitch * k], &srcBitsb[srcWidthb * k], srcWidthb);
-    }
-    set_textures->tex_draw.cBtexture->UnlockRect(0);
-    if (set_textures->tex_draw.Atexture)
-    {
-        set_textures->tex_draw.Atexture->LockRect(0, &lr, 0, 0x2000u);
-        srcWidthc = set_textures->bink_buffers.YABufferWidth;
-        srcHeightc = set_textures->bink_buffers.YABufferHeight;
-        srcBitsc = (unsigned __int8 *)bp_src->APlane.Buffer;
         dstBitsc = (char *)lr.pBits;
         if (lr.Pitch == srcWidthc)
         {

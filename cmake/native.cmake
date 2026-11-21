@@ -99,10 +99,10 @@ elseif (BO1_NATIVE_ARCH STREQUAL "arm64")
     # there is no fix-up. Cross builds pass the target and sysroot on the cmake command line.
     # There is no -mlong-double-64 for AArch64: tools/p32 turns the engine's `long double` into `double`.
     # -fsigned-char: char is signed to this code (MSVC, x86); the AArch64 ABI's is unsigned.
-    set(BO1_NATIVE_ARCH_FLAGS -fsigned-char -fno-vectorize -fno-slp-vectorize
+    set(BO1_NATIVE_ARCH_FLAGS -fsigned-char -moutline-atomics -fno-vectorize -fno-slp-vectorize
         -fno-builtin-memset -fno-builtin-memcpy -fno-builtin-memmove
         -mllvm -switch-to-lookup=false)
-    set(BO1_NATIVE_ARCH_FLAGS_PLAIN -fsigned-char)
+    set(BO1_NATIVE_ARCH_FLAGS_PLAIN -fsigned-char -moutline-atomics)
     set(BO1_NATIVE_P32 ON)
 else()
     set(BO1_NATIVE_ARCH_FLAGS_PLAIN "")
@@ -250,8 +250,8 @@ target_include_directories(${BIN_NAME} PRIVATE
     "${WEB_DIR}/compat/case"
 )
 
-set(CMAKE_C_FLAGS_RELEASE "-O2 -g")
-set(CMAKE_CXX_FLAGS_RELEASE "-O2 -g")
+set(CMAKE_C_FLAGS_RELEASE "-O3 -g")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g")
 set(CMAKE_C_FLAGS_DEBUG "-O1 -g")
 set(CMAKE_CXX_FLAGS_DEBUG "-O1 -g")
 

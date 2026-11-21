@@ -1560,7 +1560,7 @@ static bool SV_ModAsyncServer()
 {
     static const dvar_t *modAsync;
     if ( !modAsync )
-        modAsync = _Dvar_RegisterBool("cg_mod_asyncServer", 0, 0,
+        modAsync = _Dvar_RegisterBool("cg_mod_asyncServer", 1, 0,
             "mod: the client draws frames while the listen server's frame still runs, instead of waiting for it (large hordes)");
     return modAsync->current.enabled;
 }

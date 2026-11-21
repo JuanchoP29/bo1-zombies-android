@@ -225,6 +225,23 @@ extern "C" int bo1vk_available(void)
     // DXVK's log goes to stderr only (the program's log); by default it would also write <program>_d3d9.log into the
     // working directory, which is the game folder
     setenv("DXVK_LOG_PATH", "none", 0);
+    // Universal adaptive DXVK tuning (overwrite=0 so files/env.txt can override):
+    // - maxFrameLatency=2 keeps CPU 1 frame ahead without adding input lag
+    // - lenientClear & deferSurfaceCreation avoid slow clear fallbacks and redundant swapchain rebuilds
+    // - numCompilerThreads scales to half the online cores (clamped 2..4) for fast shader compile on any phone
+    {
+        long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+        int compilerThreads = (int)(cpus > 0 ? cpus / 2 : 2);
+        if (compilerThreads < 2)
+            compilerThreads = 2;
+        else if (compilerThreads > 4)
+            compilerThreads = 4;
+        char dxvkCfg[256];
+        snprintf(dxvkCfg, sizeof(dxvkCfg),
+            "d3d9.maxFrameLatency = 2; d3d9.lenientClear = True; d3d9.deferSurfaceCreation = True; dxvk.numCompilerThreads = %d;",
+            compilerThreads);
+        setenv("DXVK_CONFIG", dxvkCfg, 0);
+    }
     const char *path = getenv("BO1_DXVK_LIB");
     if (!path || !*path)
         path = "libdxvk_d3d9.so";
@@ -361,7 +378,11 @@ extern "C" int32_t bo1vk_d3d_create_device(bo1vk_h d3d, uint32_t adapter, uint32
     HRESULT hr;
     try
     {
-        hr = D3D->CreateDevice(adapter, (D3DDEVTYPE)devType, (HWND)s_window, behavior, &pp, &device);
+        // Always enable DXVK's internal device lock: Zombies defaults r_multithreaded_device to 0, while
+        // Bink texture uploads (Unlock_Bink_textures2), DB fastfile loads, and CG_Init access D3D9 from
+        // multiple threads concurrently. Uncontended futex locking costs nanoseconds and prevents SIGSEGV.
+        hr = D3D->CreateDevice(adapter, (D3DDEVTYPE)devType, (HWND)s_window,
+            behavior | D3DCREATE_MULTITHREADED, &pp, &device);
     }
     catch (...)
     {

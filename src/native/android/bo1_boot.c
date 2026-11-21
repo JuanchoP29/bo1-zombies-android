@@ -241,6 +241,64 @@ static int SplitArguments(char *text, char **argv, int argc, int capacity)
     return argc;
 }
 
+// Optional user environment overrides from <files>/env.txt (one KEY=VALUE per line; # comments ignored).
+static void LoadEnvFile(const char *files)
+{
+    char path[1100];
+    snprintf(path, sizeof(path), "%s/env.txt", files);
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return;
+    char line[1024];
+    while (fgets(line, sizeof(line), f))
+    {
+        char *p = line;
+        while (*p == ' ' || *p == '\t')
+            ++p;
+        if (!*p || *p == '#' || *p == '\r' || *p == '\n')
+            continue;
+        char *eq = strchr(p, '=');
+        if (!eq)
+            continue;
+        char *keyEnd = eq;
+        while (keyEnd > p && (keyEnd[-1] == ' ' || keyEnd[-1] == '\t'))
+            --keyEnd;
+        *keyEnd = 0;
+        if (!*p)
+            continue;
+        char *val = eq + 1;
+        while (*val == ' ' || *val == '\t')
+            ++val;
+        size_t len = strlen(val);
+        while (len > 0 && (val[len - 1] == '\r' || val[len - 1] == '\n' || val[len - 1] == ' ' || val[len - 1] == '\t'))
+            val[--len] = 0;
+        setenv(p, val, 1);
+        Say("env: %s=%s", p, val);
+    }
+    fclose(f);
+}
+
+// Keep DXVK state cache and Mesa/Vulkan shader caches on fast app-private internal storage (ext4/f2fs)
+// rather than slow FUSE /sdcard, using overwrite=0 so env.txt overrides always win.
+static void SetupFastCaches(void)
+{
+    const char *internal = SDL_AndroidGetInternalStoragePath();
+    if (!internal || !*internal)
+        return;
+    char cacheDir[1024], dxvkDir[1088], mesaDir[1088];
+    snprintf(cacheDir, sizeof(cacheDir), "%s/cache", internal);
+    snprintf(dxvkDir, sizeof(dxvkDir), "%s/dxvk", cacheDir);
+    snprintf(mesaDir, sizeof(mesaDir), "%s/mesa", cacheDir);
+    mkdir(cacheDir, 0700);
+    mkdir(dxvkDir, 0700);
+    mkdir(mesaDir, 0700);
+    setenv("XDG_CACHE_HOME", cacheDir, 0);
+    setenv("DXVK_STATE_CACHE_PATH", dxvkDir, 0);
+    setenv("MESA_SHADER_CACHE_DIR", mesaDir, 0);
+    setenv("MESA_SHADER_CACHE_MAX_SIZE", "512M", 0);
+    Say("shader caches: %s", cacheDir);
+}
+
 int SDL_main(int argc, char **argv)
 {
     static char game[1024], home[1024], logPath[1024], argsPath[1024], library[1024], extra[4096];
@@ -267,11 +325,16 @@ int SDL_main(int argc, char **argv)
     const int log = open(logPath, O_WRONLY | O_CREAT | O_TRUNC, 0664);
     if (log >= 0)
     {
+        static char stdoutBuf[16384];
         dup2(log, 1);
         dup2(log, 2);
         close(log);
-        setvbuf(stdout, NULL, _IOLBF, 0);
+        // Batch stdout writes over Android FUSE; stderr stays unbuffered so crashes always flush immediately.
+        setvbuf(stdout, stdoutBuf, _IOFBF, sizeof(stdoutBuf));
     }
+
+    LoadEnvFile(files);
+    SetupFastCaches();
 
     // libbo1.so is next to this library (the app's native library directory)
     Dl_info self;

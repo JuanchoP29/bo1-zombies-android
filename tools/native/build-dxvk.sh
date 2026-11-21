@@ -320,8 +320,10 @@ if [ "$TARGET" = linux ]; then
 else
   if [ "$TARGET" = x86_64 ]; then
     TRIPLE=x86_64-linux-android$API; FAMILY=x86_64; SDLDIR=$A/sdl-x86_64
+    EXTRA_CFLAGS="'-O3'"
   else
     TARGET=arm64-v8a; TRIPLE=aarch64-linux-android$API; FAMILY=aarch64; SDLDIR=$A/sdl
+    EXTRA_CFLAGS="'-O3', '-moutline-atomics'"
   fi
   [ -f $SDLDIR/lib/libSDL2.so ] || { echo "no $SDLDIR/lib/libSDL2.so: run build-android.sh first"; exit 1; }
   B=$D/build-android-$TARGET
@@ -344,8 +346,8 @@ pkg-config = 'pkg-config'
 
 [built-in options]
 pkg_config_path = '$D/cross/$TARGET'
-c_args = ['-fPIC']
-cpp_args = ['-fPIC']
+c_args = ['-fPIC', $EXTRA_CFLAGS]
+cpp_args = ['-fPIC', $EXTRA_CFLAGS]
 c_link_args = ['-Wl,-z,max-page-size=16384']
 cpp_link_args = ['-static-libstdc++', '-Wl,-z,max-page-size=16384']
 
