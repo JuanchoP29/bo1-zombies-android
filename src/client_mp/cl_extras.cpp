@@ -80,6 +80,8 @@ struct Row
 };
 
 const char *const kOffOn[] = { "Off", "On" };
+const char *const kTouchStyle[] = { "Shooter", "Xbox Digital", "PlayStation" };
+const char *const kTouchPreset[] = { "Shooter 2-Finger", "Claw 4-Finger", "Classic Gamepad" };
 const char *const kCounter[] = { "None", "Simple", "Advanced", "Full" };
 const char *const kRenderer[] = { "OpenGL ES", "Vulkan" };
 const char *const kShaderCompile[] = { "Wait (stutter)", "Effects in background", "All in background (flashes)" };   // bo1_vk_async 0 / 1 / 2
@@ -89,6 +91,8 @@ const char *const kDifficulty[] = { "Recruit", "Regular", "Hardened", "Veteran" 
 const Row kRows[] = {
     { "PLAY: MAPS AND MODES", ACTION, 0, 0, 0, 0, 0, 0, 0, 0, ACT_PLAY },
     { "TOUCH CONTROLS", CHOICE, "bo1_touch", 0, 0, 0, 0, kOffOn, 0, 2, ACT_NONE },
+    { "TOUCH STYLE", CHOICE, "bo1_touch_style", 0, 0, 0, 0, kTouchStyle, 0, 3, ACT_NONE },
+    { "TOUCH PRESET", CHOICE, "bo1_touch_preset", 0, 0, 0, 0, kTouchPreset, 0, 3, ACT_NONE },
     { "TOUCH SENSITIVITY", NUMBER, "bo1_touch_sensitivity", 0, 0.2f, 5.0f, 0.1f, 0, 0, 0, ACT_NONE },
     { "TOUCH SIZE", NUMBER, "bo1_touch_scale", 0, 0.5f, 2.0f, 0.05f, 0, 0, 0, ACT_NONE },
     { "TOUCH OPACITY", NUMBER, "bo1_touch_opacity", 0, 0.05f, 1.0f, 0.05f, 0, 0, 0, ACT_NONE },

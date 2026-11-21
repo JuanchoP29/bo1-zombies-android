@@ -8,8 +8,8 @@
      No largeHeap: the Java heap's reservation is below 4 GB, where the engine needs the room. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.bo1port.zombies.turnip"
-    android:versionCode="12"
-    android:versionName="0.5-turnip-custom7"
+    android:versionCode="13"
+    android:versionName="0.5-turnip-custom8"
     android:installLocation="auto">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
@@ -23,9 +23,12 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- joining and hosting games by address (UDP) -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- allow selecting the Black Ops game folder from any storage location without duplicating ~8 GB -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application
-        android:label="BO1 Port Turnip"
+        android:label="Black Ops I"
         android:allowBackup="false"
         android:hardwareAccelerated="true"
         android:extractNativeLibs="true"
@@ -36,6 +39,16 @@
         <meta-data android:name="SDL_ENV.SDL_ACCELEROMETER_AS_JOYSTICK" android:value="0" />
 
         <activity
+            android:name="org.bo1port.zombies.LauncherActivity"
+            android:exported="true"
+            android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name="org.bo1port.zombies.Bo1Activity"
             android:exported="true"
             android:screenOrientation="sensorLandscape"
@@ -43,10 +56,6 @@
             android:launchMode="singleInstance"
             android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:preferMinimalPostProcessing="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>

@@ -31,12 +31,17 @@ void bo1_native_touch_read(unsigned *buttons, float *lt, float *rt, float *lx, f
 
 // For drawing: shape `index` (0, 1, ... until it returns 0): center, half extents, whether it is held, its label
 // (copied, at most labelSize - 1 characters).
-// style: 0 a button, 1 a fire button, 2 the move stick's ring, 3 its knob.
+// style: 0 button, 1 fire (RT/R2), 2 stick ring, 3 stick knob,
+//        10 jump (A/Cross), 11 crouch (B/Circle), 12 use (X/Square), 13 swap (Y/Triangle),
+//        14 aim (LT/L2), 15 knife (R3), 16 nade (RB/R1), 17 tac (LB/L1), 18 pause, 19 scores.
 int bo1_native_touch_shape(int index, float *x, float *y, float *halfWidth, float *halfHeight, int *held, int *style,
     char *label, int labelSize);
 
+// Apply a preloaded layout preset (0 Shooter 2-finger, 1 Claw 4-finger, 2 Classic Gamepad).
+void bo1_native_touch_preset(int preset, int saveNow);
+
 // Layout editing: while on, a finger drags the control it lands on and the controls press nothing. Turning it off
-// saves the layout. Reset puts every control back to its default place (and saves).
+// saves the layout. Reset puts every control back to its active preset's default place (and saves).
 void bo1_native_touch_edit(int on);
 int bo1_native_touch_editing(void);
 void bo1_native_touch_reset(void);

@@ -49,6 +49,7 @@ void bo1_native_touch_layout_file(const char *path);
 int bo1_native_touch_wants_fingers(void);
 int bo1_native_touch_shape(int index, float *x, float *y, float *halfWidth, float *halfHeight, int *held, int *style,
     char *label, int labelSize);
+void bo1_native_touch_preset(int preset, int saveNow);
 void bo1_native_touch_weapon(int semiAuto, float pullsPerSecond);
 void bo1_native_touch_edit(int on);
 int bo1_native_touch_editing(void);
@@ -59,6 +60,8 @@ void bo1_native_second_screen_settings(int enabled, int ingame);
 namespace
 {
 const dvar_t *bo1_touch;
+const dvar_t *bo1_touch_style;
+const dvar_t *bo1_touch_preset;
 const dvar_t *bo1_second_screen;
 const dvar_t *bo1_touch_sensitivity;
 const dvar_t *bo1_touch_scale;
@@ -68,6 +71,50 @@ const dvar_t *bo1_touch_autofire_rate;
 cmd_function_s s_editCmd, s_resetCmd;
 bool s_registered;
 bool s_fileGiven;
+int s_appliedPreset = -1;
+
+// Crisp vector PlayStation symbols drawn with the engine's 2D quad primitive (no external textures needed).
+void DrawPsCross(float cx, float cy, float r, const float *col)
+{
+    const float t = r * 0.22f < 2.0f ? 2.0f : r * 0.22f;
+    const int steps = 12;
+    for (int i = 0; i < steps; ++i)
+    {
+        const float u = -1.0f + 2.0f * ((float)i + 0.5f) / (float)steps;
+        const float dx = u * r * 0.72f;
+        const float dy = u * r * 0.72f;
+        R_AddCmdDrawStretchPic(cx + dx - t * 0.5f, cy + dy - t * 0.5f, t, t, 0, 0, 1, 1, col, cls.whiteMaterial);
+        R_AddCmdDrawStretchPic(cx + dx - t * 0.5f, cy - dy - t * 0.5f, t, t, 0, 0, 1, 1, col, cls.whiteMaterial);
+    }
+}
+
+void DrawPsSquare(float cx, float cy, float r, const float *col)
+{
+    const float s = r * 0.72f;
+    const float t = r * 0.18f < 2.0f ? 2.0f : r * 0.18f;
+    R_AddCmdDrawStretchPic(cx - s, cy - s, 2.0f * s, t, 0, 0, 1, 1, col, cls.whiteMaterial);
+    R_AddCmdDrawStretchPic(cx - s, cy + s - t, 2.0f * s, t, 0, 0, 1, 1, col, cls.whiteMaterial);
+    R_AddCmdDrawStretchPic(cx - s, cy - s, t, 2.0f * s, 0, 0, 1, 1, col, cls.whiteMaterial);
+    R_AddCmdDrawStretchPic(cx + s - t, cy - s, t, 2.0f * s, 0, 0, 1, 1, col, cls.whiteMaterial);
+}
+
+void DrawPsTriangle(float cx, float cy, float r, const float *col)
+{
+    const float t = r * 0.18f < 2.0f ? 2.0f : r * 0.18f;
+    const float topY = cy - r * 0.76f;
+    const float botY = cy + r * 0.64f;
+    const float halfBase = r * 0.78f;
+    R_AddCmdDrawStretchPic(cx - halfBase, botY - t * 0.5f, 2.0f * halfBase, t, 0, 0, 1, 1, col, cls.whiteMaterial);
+    const int steps = 14;
+    for (int i = 0; i < steps; ++i)
+    {
+        const float u = ((float)i + 0.5f) / (float)steps;
+        const float y = topY + u * (botY - topY);
+        const float xOff = u * halfBase;
+        R_AddCmdDrawStretchPic(cx - xOff - t * 0.5f, y - t * 0.5f, t, t, 0, 0, 1, 1, col, cls.whiteMaterial);
+        R_AddCmdDrawStretchPic(cx + xOff - t * 0.5f, y - t * 0.5f, t, t, 0, 0, 1, 1, col, cls.whiteMaterial);
+    }
+}
 
 // A disc of `fill` with a ring of `ring` around it (ringWidth: its share of the radius), centered at (cx, cy) with
 // half extents (rx, ry), as horizontal strips.
@@ -119,6 +166,8 @@ void CL_Touch_Draw()
         const int on = 0;
 #endif
         bo1_touch = _Dvar_RegisterInt("bo1_touch", on, 0, 1, 1u, "mod (touch): on-screen touch controls");
+        bo1_touch_style = _Dvar_RegisterInt("bo1_touch_style", 0, 0, 2, 1u, "mod (touch): button visual style: 0 Shooter, 1 Xbox Digital, 2 PlayStation");
+        bo1_touch_preset = _Dvar_RegisterInt("bo1_touch_preset", 0, 0, 2, 1u, "mod (touch): layout preset: 0 Shooter 2-finger, 1 Claw 4-finger, 2 Classic Gamepad");
         bo1_touch_sensitivity = _Dvar_RegisterFloat("bo1_touch_sensitivity", 1.2f, 0.2f, 5.0f, 1u, "mod (touch): look sensitivity of a finger");
         bo1_touch_scale = _Dvar_RegisterFloat("bo1_touch_scale", 1.0f, 0.5f, 2.0f, 1u, "mod (touch): size of the on-screen controls");
         bo1_touch_opacity = _Dvar_RegisterFloat("bo1_touch_opacity", 0.28f, 0.05f, 1.0f, 1u, "mod (touch): opacity of the on-screen controls");
@@ -132,7 +181,14 @@ void CL_Touch_Draw()
     if (!s_fileGiven && fs_homepath && fs_homepath->current.string && fs_homepath->current.string[0])
     {
         s_fileGiven = true;
+        s_appliedPreset = bo1_touch_preset->current.integer;
+        bo1_native_touch_preset(s_appliedPreset, 0);
         bo1_native_touch_layout_file(va("%s/touch_layout.txt", fs_homepath->current.string));
+    }
+    if (s_fileGiven && bo1_touch_preset && bo1_touch_preset->current.integer != s_appliedPreset)
+    {
+        s_appliedPreset = bo1_touch_preset->current.integer;
+        bo1_native_touch_preset(s_appliedPreset, 1);
     }
     const float screenW = scrPlaceFull.realViewportSize[0] > 0.0f ? scrPlaceFull.realViewportSize[0] : 1280.0f;
     const float screenH = scrPlaceFull.realViewportSize[1] > 0.0f ? scrPlaceFull.realViewportSize[1] : 720.0f;
@@ -167,6 +223,7 @@ void CL_Touch_Draw()
         static const float shade[4] = { 0.0f, 0.0f, 0.0f, 0.45f };
         R_AddCmdDrawStretchPic(0.0f, 0.0f, screenW, screenH, 0.0f, 0.0f, 1.0f, 1.0f, shade, cls.whiteMaterial);
     }
+    const int visualStyle = bo1_touch_style ? bo1_touch_style->current.integer : 0;
     for (int index = 0;; ++index)
     {
         float x = 0.0f, y = 0.0f, halfW = 0.0f, halfH = 0.0f;
@@ -183,10 +240,58 @@ void CL_Touch_Draw()
         float ring[4] = { 1.0f, 1.0f, 1.0f, strength * 0.75f };
         float ink[4] = { 1.0f, 1.0f, 1.0f, strength };
         float ringWidth = 0.09f;
-        if (style == 1)
+        const char *drawLabel = label;
+        int psGlyph = 0; // 1=Cross, 2=Circle, 3=Square, 4=Triangle
+
+        if (visualStyle == 1) // Xbox Digital
         {
-            ring[1] = 0.45f;
-            ring[2] = 0.35f;
+            switch (style)
+            {
+            case 1:  drawLabel = "RT"; ring[0] = 0.96f; ring[1] = 0.42f; ring[2] = 0.25f; break;
+            case 14: drawLabel = "LT"; ring[0] = 0.95f; ring[1] = 0.72f; ring[2] = 0.22f; break;
+            case 10: drawLabel = "A";  ring[0] = 0.22f; ring[1] = 0.86f; ring[2] = 0.34f; ink[0] = 0.35f; ink[1] = 0.96f; ink[2] = 0.45f; break;
+            case 11: drawLabel = "B";  ring[0] = 0.94f; ring[1] = 0.26f; ring[2] = 0.24f; ink[0] = 1.00f; ink[1] = 0.40f; ink[2] = 0.38f; break;
+            case 12: drawLabel = "X";  ring[0] = 0.24f; ring[1] = 0.58f; ring[2] = 0.98f; ink[0] = 0.40f; ink[1] = 0.72f; ink[2] = 1.00f; break;
+            case 13: drawLabel = "Y";  ring[0] = 0.96f; ring[1] = 0.82f; ring[2] = 0.18f; ink[0] = 1.00f; ink[1] = 0.88f; ink[2] = 0.32f; break;
+            case 15: drawLabel = "R3"; break;
+            case 16: drawLabel = "RB"; break;
+            case 17: drawLabel = "LB"; break;
+            case 18: drawLabel = "MENU"; break;
+            case 19: drawLabel = "VIEW"; break;
+            default: break;
+            }
+        }
+        else if (visualStyle == 2) // PlayStation Digital
+        {
+            switch (style)
+            {
+            case 1:  drawLabel = "R2"; ring[0] = 0.96f; ring[1] = 0.42f; ring[2] = 0.25f; break;
+            case 14: drawLabel = "L2"; ring[0] = 0.95f; ring[1] = 0.72f; ring[2] = 0.22f; break;
+            case 10: psGlyph = 1; drawLabel = ""; ring[0] = 0.36f; ring[1] = 0.64f; ring[2] = 1.00f; ink[0] = 0.48f; ink[1] = 0.76f; ink[2] = 1.00f; break;
+            case 11: psGlyph = 2; drawLabel = ""; ring[0] = 0.96f; ring[1] = 0.34f; ring[2] = 0.38f; ink[0] = 1.00f; ink[1] = 0.46f; ink[2] = 0.48f; break;
+            case 12: psGlyph = 3; drawLabel = ""; ring[0] = 0.94f; ring[1] = 0.48f; ring[2] = 0.78f; ink[0] = 0.98f; ink[1] = 0.60f; ink[2] = 0.86f; break;
+            case 13: psGlyph = 4; drawLabel = ""; ring[0] = 0.24f; ring[1] = 0.88f; ring[2] = 0.68f; ink[0] = 0.36f; ink[1] = 0.96f; ink[2] = 0.78f; break;
+            case 15: drawLabel = "R3"; break;
+            case 16: drawLabel = "R1"; break;
+            case 17: drawLabel = "L1"; break;
+            case 18: drawLabel = "OPT"; break;
+            case 19: drawLabel = "MAP"; break;
+            default: break;
+            }
+        }
+        else // Shooter Tactical (default)
+        {
+            if (style == 1)
+            {
+                ring[1] = 0.45f;
+                ring[2] = 0.35f;
+            }
+            else if (style == 14)
+            {
+                ring[0] = 0.98f;
+                ring[1] = 0.68f;
+                ring[2] = 0.22f;
+            }
         }
         if (style == 2)
         {
@@ -210,14 +315,30 @@ void CL_Touch_Draw()
             ring[3] = strength;
         }
         Disc(cx, cy, rx, ry, ringWidth, fill, ring);
-        if (!label[0] || !font || fontHeight <= 0.0f)
+        if (psGlyph > 0)
+        {
+            const float gr = (rx < ry ? rx : ry) * 0.56f;
+            if (psGlyph == 1)
+                DrawPsCross(cx, cy, gr, ink);
+            else if (psGlyph == 2)
+            {
+                static const float kClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                Disc(cx, cy, gr * 0.78f, gr * 0.78f, 0.24f, kClear, ink);
+            }
+            else if (psGlyph == 3)
+                DrawPsSquare(cx, cy, gr, ink);
+            else if (psGlyph == 4)
+                DrawPsTriangle(cx, cy, gr, ink);
+            continue;
+        }
+        if (!drawLabel[0] || !font || fontHeight <= 0.0f)
             continue;
         // the label: under a third of the button's height, narrowed to fit inside the ring
         float scale = ry * 0.62f / fontHeight;
-        const float textWidth = (float)R_TextWidth(label, 0x7FFFFFFF, font);
+        const float textWidth = (float)R_TextWidth(drawLabel, 0x7FFFFFFF, font);
         if (textWidth * scale > rx * 1.45f && textWidth > 0.0f)
             scale = rx * 1.45f / textWidth;
-        R_AddCmdDrawText(label, 0x7FFFFFFF, font, cx - textWidth * scale * 0.5f, cy + fontHeight * scale * 0.5f, scale,
+        R_AddCmdDrawText(drawLabel, 0x7FFFFFFF, font, cx - textWidth * scale * 0.5f, cy + fontHeight * scale * 0.5f, scale,
             scale, 0.0f, ink, 3);
     }
 }

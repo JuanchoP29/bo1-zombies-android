@@ -309,6 +309,36 @@ int SDL_main(int argc, char **argv)
         return 1;
     }
     snprintf(game, sizeof(game), "%s/game", files);
+    // Optional custom game directory chosen from LauncherActivity (<files>/game_path.txt).
+    {
+        char pathFile[1100], customGame[1024], probe[1100];
+        snprintf(pathFile, sizeof(pathFile), "%s/game_path.txt", files);
+        FILE *pf = fopen(pathFile, "r");
+        if (pf)
+        {
+            if (fgets(customGame, sizeof(customGame), pf))
+            {
+                size_t n = strlen(customGame);
+                while (n > 0 && (customGame[n - 1] == '\r' || customGame[n - 1] == '\n'
+                                 || customGame[n - 1] == ' ' || customGame[n - 1] == '\t' || customGame[n - 1] == '/'))
+                    customGame[--n] = 0;
+                if (customGame[0] == '/')
+                {
+                    snprintf(probe, sizeof(probe), "%s/localization.txt", customGame);
+                    if (access(probe, R_OK) == 0)
+                    {
+                        snprintf(game, sizeof(game), "%s", customGame);
+                        Say("custom game path: %s", game);
+                    }
+                    else
+                    {
+                        Say("custom game path '%s' missing localization.txt; falling back to default", customGame);
+                    }
+                }
+            }
+            fclose(pf);
+        }
+    }
     snprintf(home, sizeof(home), "%s/home", files);
     snprintf(logPath, sizeof(logPath), "%s/bo1.log", files);
     snprintf(argsPath, sizeof(argsPath), "%s/args.txt", files);

@@ -95,6 +95,7 @@ struct Finger
 std::mutex s_lock;
 Place s_place[kControlCount];
 bool s_placed;
+int s_preset = 0;               // 0 Shooter 2-finger, 1 Claw 4-finger, 2 Classic Gamepad
 int s_held[kControlCount];      // fingers on it
 bool s_toggled[kControlCount];
 Finger s_finger[kFingers];
@@ -110,6 +111,49 @@ float s_pullsPerSecond;         // a held FIRE's pulls for such a weapon (0: hel
 bool s_fireWasHeld;
 double s_fireSince;             // when FIRE went down
 
+// Preloaded layout presets (1 = Claw 4-finger shooter, 2 = Classic console gamepad diamond).
+const Place kPresetClaw[kControlCount] = {
+    { 0.120f, 0.210f, 0.082f }, // fire (top-left index)
+    { 0.840f, 0.610f, 0.068f }, // fire2 (right thumb)
+    { 0.880f, 0.210f, 0.072f }, // aim (top-right index)
+    { 0.945f, 0.720f, 0.058f }, // jump
+    { 0.945f, 0.500f, 0.054f }, // crouch
+    { 0.755f, 0.500f, 0.058f }, // use
+    { 0.785f, 0.320f, 0.052f }, // swap
+    { 0.680f, 0.690f, 0.052f }, // knife
+    { 0.615f, 0.900f, 0.048f }, // nade
+    { 0.520f, 0.900f, 0.048f }, // tac
+    { 0.265f, 0.145f, 0.032f }, // up
+    { 0.265f, 0.275f, 0.032f }, // down
+    { 0.220f, 0.210f, 0.032f }, // left
+    { 0.310f, 0.210f, 0.032f }, // right
+    { 0.965f, 0.065f, 0.038f }, // pause
+    { 0.895f, 0.065f, 0.038f }, // scores
+    { 0.440f, 0.080f, 0.050f }, // done
+    { 0.560f, 0.080f, 0.050f }, // reset
+};
+
+const Place kPresetGamepad[kControlCount] = {
+    { 0.915f, 0.210f, 0.072f }, // fire (RT / R2)
+    { 0.085f, 0.440f, 0.054f }, // fire2 (left helper)
+    { 0.085f, 0.210f, 0.072f }, // aim (LT / L2)
+    { 0.865f, 0.785f, 0.056f }, // jump (A / Cross - bottom of diamond)
+    { 0.940f, 0.640f, 0.056f }, // crouch (B / Circle - right of diamond)
+    { 0.790f, 0.640f, 0.056f }, // use (X / Square - left of diamond)
+    { 0.865f, 0.495f, 0.056f }, // swap (Y / Triangle - top of diamond)
+    { 0.700f, 0.800f, 0.050f }, // knife (R3)
+    { 0.795f, 0.210f, 0.054f }, // nade (RB / R1)
+    { 0.205f, 0.210f, 0.054f }, // tac (LB / L1)
+    { 0.115f, 0.625f, 0.036f }, // up
+    { 0.115f, 0.795f, 0.036f }, // down
+    { 0.065f, 0.710f, 0.036f }, // left
+    { 0.165f, 0.710f, 0.036f }, // right
+    { 0.555f, 0.075f, 0.040f }, // pause (START / OPTIONS)
+    { 0.445f, 0.075f, 0.040f }, // scores (BACK / SHARE)
+    { 0.440f, 0.180f, 0.050f }, // done
+    { 0.560f, 0.180f, 0.050f }, // reset
+};
+
 double Now()
 {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -117,11 +161,19 @@ double Now()
 
 void Defaults()
 {
+    const Place *presetTable = s_preset == 1 ? kPresetClaw : (s_preset == 2 ? kPresetGamepad : nullptr);
     for (int i = 0; i < kControlCount; ++i)
     {
-        s_place[i].x = kControls[i].x;
-        s_place[i].y = kControls[i].y;
-        s_place[i].size = kControls[i].size;
+        if (presetTable)
+        {
+            s_place[i] = presetTable[i];
+        }
+        else
+        {
+            s_place[i].x = kControls[i].x;
+            s_place[i].y = kControls[i].y;
+            s_place[i].size = kControls[i].size;
+        }
     }
     s_placed = true;
 }
@@ -442,7 +494,30 @@ extern "C" int bo1_native_touch_shape(int index, float *x, float *y, float *half
         *halfWidth = HalfWidth(i);
         *halfHeight = HalfHeight(i);
         *held = kControls[i].kind == TOGGLE ? s_toggled[i] : s_held[i] > 0;
-        *style = kControls[i].trigger == 2 ? 1 : 0;
+        int st = 0;
+        if (kControls[i].trigger == 2)
+            st = 1;
+        else if (kControls[i].trigger == 1)
+            st = 14;
+        else if (kControls[i].button == GPAD_RAW_A)
+            st = 10;
+        else if (kControls[i].button == GPAD_RAW_B)
+            st = 11;
+        else if (kControls[i].button == GPAD_RAW_X)
+            st = 12;
+        else if (kControls[i].button == GPAD_RAW_Y)
+            st = 13;
+        else if (kControls[i].button == GPAD_RAW_RIGHT_THUMB)
+            st = 15;
+        else if (kControls[i].button == GPAD_RAW_RIGHT_SHOULDER)
+            st = 16;
+        else if (kControls[i].button == GPAD_RAW_LEFT_SHOULDER)
+            st = 17;
+        else if (kControls[i].button == GPAD_RAW_START)
+            st = 18;
+        else if (kControls[i].button == GPAD_RAW_BACK)
+            st = 19;
+        *style = st;
         snprintf(label, (size_t)labelSize, "%s", kControls[i].label);
         return 1;
     }
@@ -481,6 +556,17 @@ extern "C" void bo1_native_touch_edit(int on)
 extern "C" int bo1_native_touch_editing(void)
 {
     return s_editing;
+}
+
+extern "C" void bo1_native_touch_preset(int preset, int saveNow)
+{
+    std::lock_guard<std::mutex> guard(s_lock);
+    if (preset < 0 || preset > 2)
+        preset = 0;
+    s_preset = preset;
+    Defaults();
+    if (saveNow)
+        Save();
 }
 
 extern "C" void bo1_native_touch_reset(void)

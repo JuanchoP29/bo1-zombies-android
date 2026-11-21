@@ -263,6 +263,7 @@ jobs:
             printf '%s\n' "$BO1_KEYSTORE_PASS" > /tmp/bo1-release.pass
             ALIAS=$(keytool -list -keystore /tmp/bo1-release.p12 -storepass "$BO1_KEYSTORE_PASS" -storetype PKCS12 | awk -F, '/PrivateKeyEntry/{print $1; exit}')
             echo "Signing release APK with keystore alias: $ALIAS"
+            ICON_DIR=/bo1/src/android/icon \
             RELEASE_KEYSTORE=/tmp/bo1-release.p12 \
             RELEASE_ALIAS="$ALIAS" \
             RELEASE_PASS_FILE=/tmp/bo1-release.pass \
@@ -270,6 +271,7 @@ jobs:
             rm -f /tmp/bo1-release.p12 /tmp/bo1-release.pass
           else
             echo "No release keystore secrets set; signing debug APK"
+            ICON_DIR=/bo1/src/android/icon \
             bash /bo1/src/tools/native/build-apk.sh
           fi
           chmod -R a+rX /bo1/android/out
