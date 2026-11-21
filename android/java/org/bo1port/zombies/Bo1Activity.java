@@ -1,8 +1,15 @@
 package org.bo1port.zombies;
 
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.CombinedVibration;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
+import android.util.Log;
 import android.view.Display;
+import android.view.InputDevice;
 import android.view.WindowManager;
 
 import java.io.File;
@@ -81,10 +88,103 @@ public class Bo1Activity extends SDLActivity {
 
     @Override
     protected void onStop() {
+        setControllerRumble("0 0");
         if (secondScreen != null) {
             secondScreen.stop();
         }
         super.onStop();
+    }
+
+    private boolean rumbleLogged;
+
+    /**
+     * Native Android gamepad rumble (SDL2's ANDROID_JoystickRumble returns SDL_Unsupported for Bluetooth pads).
+     * Uses InputDevice.getVibratorManager() on Android 12+ for dual-motor rumble (low/high 0..255), with
+     * InputDevice.getVibrator() fallback on Android 8-11.
+     */
+    public void setControllerRumble(String spec) {
+        try {
+            if (spec == null) {
+                return;
+            }
+            String[] parts = spec.trim().split("\\s+");
+            if (parts.length < 2) {
+                return;
+            }
+            int low = Math.max(0, Math.min(255, Integer.parseInt(parts[0])));
+            int high = Math.max(0, Math.min(255, Integer.parseInt(parts[1])));
+            int[] devIds = InputDevice.getDeviceIds();
+            // Pass 0: standard gamepad/joystick InputDevice; Pass 1: any external non-virtual device with a vibrator
+            for (int pass = 0; pass < 2; pass++) {
+                for (int devId : devIds) {
+                    InputDevice dev = InputDevice.getDevice(devId);
+                    if (dev == null || dev.isVirtual()) {
+                        continue;
+                    }
+                    int src = dev.getSources();
+                    boolean isPad = ((src & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD)
+                            || ((src & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK);
+                    if (pass == 0 ? !isPad : (isPad || dev.getVendorId() == 0)) {
+                        continue;
+                    }
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        VibratorManager vm = dev.getVibratorManager();
+                        if (vm != null) {
+                            int[] vibIds = vm.getVibratorIds();
+                            if (vibIds != null && vibIds.length > 0) {
+                                if (!rumbleLogged && (low > 0 || high > 0)) {
+                                    rumbleLogged = true;
+                                    Log.i("BO1Rumble", "Using VibratorManager on '" + dev.getName()
+                                            + "' (pass=" + pass + ", motors=" + vibIds.length
+                                            + ", low=" + low + ", high=" + high + ")");
+                                }
+                                if (low <= 0 && high <= 0) {
+                                    vm.cancel();
+                                } else if (vibIds.length >= 2) {
+                                    CombinedVibration.ParallelCombination combo = CombinedVibration.startParallel();
+                                    if (low > 0) {
+                                        combo.addVibrator(vibIds[0], VibrationEffect.createOneShot(5000, low));
+                                    }
+                                    if (high > 0) {
+                                        combo.addVibrator(vibIds[1], VibrationEffect.createOneShot(5000, high));
+                                    }
+                                    vm.vibrate(combo.combine());
+                                } else {
+                                    int amp = Math.max(low, high);
+                                    vm.vibrate(CombinedVibration.createParallel(VibrationEffect.createOneShot(5000, amp)));
+                                }
+                                return;
+                            }
+                        }
+                    }
+                    @SuppressWarnings("deprecation")
+                    Vibrator vib = dev.getVibrator();
+                    if (vib != null && vib.hasVibrator()) {
+                        if (!rumbleLogged && (low > 0 || high > 0)) {
+                            rumbleLogged = true;
+                            Log.i("BO1Rumble", "Using legacy Vibrator on '" + dev.getName()
+                                    + "' (pass=" + pass + ", low=" + low + ", high=" + high + ")");
+                        }
+                        int amp = Math.max(low, high);
+                        if (amp <= 0) {
+                            vib.cancel();
+                        } else {
+                            vib.vibrate(VibrationEffect.createOneShot(5000, amp));
+                        }
+                        return;
+                    }
+                }
+            }
+            if (!rumbleLogged && (low > 0 || high > 0)) {
+                rumbleLogged = true;
+                Log.w("BO1Rumble", "No controller vibrator found among " + devIds.length + " input devices");
+            }
+        } catch (Throwable t) {
+            if (!rumbleLogged) {
+                rumbleLogged = true;
+                Log.w("BO1Rumble", "Controller rumble error: " + t);
+            }
+        }
     }
 
     /** From the engine, on its thread: "<bo1_second_screen> <in a game> <Zombies>" (SecondScreen.onState). */

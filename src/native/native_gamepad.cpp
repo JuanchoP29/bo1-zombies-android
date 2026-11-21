@@ -61,6 +61,10 @@ void bo1_native_input_buttons(int mask);
 void bo1_native_input_focus(int active);
 // native_second_screen.cpp
 void bo1_native_second_screen_frame(GPadRawState *slot0);
+#ifdef __ANDROID__
+// native_extras.cpp
+void bo1_native_call_activity(const char *method, const char *text);
+#endif
 }
 std::vector<TestStep> s_test;
 std::vector<SDL_JoystickID> s_ignored;   // devices looked at once and found not to be game pads
@@ -400,6 +404,10 @@ extern "C" void bo1_native_gamepad_update(void)
     {
         GPadRawState s{};
         SDL_GameController *c = s_controllers[slot];
+#ifdef __ANDROID__
+        static int s_lastAmpL = -1, s_lastAmpH = -1;
+        static Uint32 s_lastRumbleMs = 0;
+#endif
         if (c)
         {
             s.connected = true;
@@ -418,13 +426,43 @@ extern "C" void bo1_native_gamepad_update(void)
                 s_rumbleHigh[slot] = high;
                 const float l = low < 0 ? 0 : low > 1 ? 1 : low, h = high < 0 ? 0 : high > 1 ? 1 : high;
                 SDL_GameControllerRumble(c, (Uint16)(l * 65535.0f), (Uint16)(h * 65535.0f), l > 0 || h > 0 ? 5000 : 0);
+#ifdef __ANDROID__
+                if (slot == 0)
+                {
+                    const int ampL = (int)(l * 255.0f + 0.5f);
+                    const int ampH = (int)(h * 255.0f + 0.5f);
+                    const Uint32 nowMs = SDL_GetTicks();
+                    const bool stopping = (ampL == 0 && ampH == 0);
+                    const bool starting = (s_lastAmpL <= 0 && s_lastAmpH <= 0 && !stopping);
+                    if ((ampL != s_lastAmpL || ampH != s_lastAmpH) && (stopping || starting || nowMs - s_lastRumbleMs >= 25))
+                    {
+                        s_lastAmpL = ampL;
+                        s_lastAmpH = ampH;
+                        s_lastRumbleMs = nowMs;
+                        char rumbleSpec[32];
+                        snprintf(rumbleSpec, sizeof(rumbleSpec), "%d %d", ampL, ampH);
+                        bo1_native_call_activity("setControllerRumble", rumbleSpec);
+                    }
+                }
+#endif
             }
         }
-        else if (slot == 0 && bo1_native_touch_is_pad())
+        else
         {
-            // no controller: the on-screen touch controls are the pad
-            s.connected = true;
-            MergeTouch(s);
+#ifdef __ANDROID__
+            if (slot == 0 && (s_lastAmpL > 0 || s_lastAmpH > 0))
+            {
+                s_lastAmpL = 0;
+                s_lastAmpH = 0;
+                bo1_native_call_activity("setControllerRumble", "0 0");
+            }
+#endif
+            if (slot == 0 && bo1_native_touch_is_pad())
+            {
+                // no controller: the on-screen touch controls are the pad
+                s.connected = true;
+                MergeTouch(s);
+            }
         }
         if (slot == 0)
             bo1_native_second_screen_frame(&s);   // mod (native): the second screen's pads (native_second_screen.cpp)

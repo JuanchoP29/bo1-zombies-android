@@ -50,12 +50,9 @@ void __cdecl PMem_Init()
             size += zoneWords > 2 ? (unsigned int)zoneWords * 0x8000000u : 0x10000000u;
         }
 #ifdef BO1_NATIVE
-        // mod (native): Multiplayer keeps ui_viewer_mp (the Create-a-Class preview, about 48 MB; database/db_registry.cpp
-        // loads it on native builds) through a match, as retail does: with retail's size the map that followed was
-        // 13 MB short (`Need 13095888 more bytes of 'main' physical ram`, Summit). It sits under the per-client
-        // memory on this stack, so it cannot be freed for the match. 64 MB more, not in Zombies (no such zone).
-        if ( !I_stristr(GetCommandLineA(), "bo1_zombies 1") )
-            size += 0x4000000u;
+        // mod (custom): add 64 MB headroom on native builds for both Multiplayer and Zombies
+        // (avoids PMem OOM when switching maps or returning from match to frontend).
+        size += 0x4000000u;
 #endif
         memory = (unsigned __int8 *)VirtualAlloc(0, size, 0x1000u, 4u);
         PMem_InitPhysicalMemory(&g_mem, "main", memory, size);

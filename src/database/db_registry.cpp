@@ -5508,7 +5508,9 @@ void __cdecl DB_LoadFastFilesForPC()
         zone++;
     }
 
-    if (!IsDedicatedServer())
+    // mod (custom): ui_viewer_mp is Multiplayer's Create-a-Class 3D preview (~48 MB, 4s load).
+    // Zombies never uses it, and keeping it loaded after returning to frontend caused OOM on match #2.
+    if (!IsDedicatedServer() && !(bo1_zombies && bo1_zombies->current.enabled))
     {
         zoneInfo[zone].name = "ui_viewer_mp";
         zoneInfo[zone].allocFlags = 2048;

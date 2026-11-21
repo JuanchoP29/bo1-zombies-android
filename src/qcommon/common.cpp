@@ -2863,23 +2863,28 @@ void Com_LoadUiFastFile()
         DB_LoadXAssets(zoneInfo, zone, 0);
 #endif
 
-        zone = 0;
-
-        zoneInfo[zone].name = "ui_viewer_mp";
-#ifdef BO1_DEDICATED
-        zoneInfo[zone].allocFlags = 0x2000000;
-#else
-        zoneInfo[zone].allocFlags = 2048;
-#endif
-        zoneInfo[zone].freeFlags = 0;
-        zone++;
-
         if (fs_usermapDir && fs_usermapDir->current.string[0])
         {
             Dvar_SetStringByName("fs_usermapdir", (char*)"");
         }
 
-        DB_LoadXAssets(zoneInfo, zone, 0);
+        // mod (custom): ui_viewer_mp is Multiplayer's Create-a-Class 3D preview (~48 MB, 4s load).
+        // Zombies never uses it, and reloading it on return from a match caused PMem OOM on match #2.
+        if (!(bo1_zombies && bo1_zombies->current.enabled))
+        {
+            zone = 0;
+
+            zoneInfo[zone].name = "ui_viewer_mp";
+#ifdef BO1_DEDICATED
+            zoneInfo[zone].allocFlags = 0x2000000;
+#else
+            zoneInfo[zone].allocFlags = 2048;
+#endif
+            zoneInfo[zone].freeFlags = 0;
+            zone++;
+
+            DB_LoadXAssets(zoneInfo, zone, 0);
+        }
     }
 }
 
