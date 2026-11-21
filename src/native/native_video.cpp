@@ -436,9 +436,19 @@ void PointerMoved(int dx, int dy, int x, int y)
         }
         x -= (w - pw) / 2;
         y -= (h - ph) / 2;
-        // relative motion in the picture's pixels too
-        dx = dx * bw / pw;
-        dy = dy * bh / ph;
+        // Relative 3D camera motion (s_grabbed) must never be integer-scaled by bw/pw: on a 1000 Hz (1 ms)
+        // mouse at 1600x720 on a 2400x1080 screen, (+/-1) * 1600 / 2400 truncates to 0, discarding 100% of
+        // fine micro-aiming. Pass raw 1:1 counts while grabbed, and keep sub-pixel remainders in menus.
+        if (!s_grabbed)
+        {
+            static float s_remDx = 0.0f, s_remDy = 0.0f;
+            const float fdx = (float)dx * (float)bw / (float)pw + s_remDx;
+            const float fdy = (float)dy * (float)bh / (float)ph + s_remDy;
+            dx = (int)fdx;
+            dy = (int)fdy;
+            s_remDx = fdx - (float)dx;
+            s_remDy = fdy - (float)dy;
+        }
         w = pw;
         h = ph;
     }

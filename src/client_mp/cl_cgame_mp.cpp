@@ -1353,9 +1353,9 @@ void __cdecl CL_SetCGameTime(int localClientNum)
                 const bool isSolo = com_sv_running && com_sv_running->current.enabled
                     && !Dvar_GetBool("onlinegame") && !Dvar_GetBool("systemlink");
                 const unsigned int elapsed = (unsigned int)(Sys_Milliseconds() - (int)Com_GetZombieLoadCinematicStartMs());
-                const bool stillOpening = elapsed < 2500u && !R_Cinematic_IsStarted() && !R_Cinematic_IsFinished();
+                const bool stillOpening = elapsed < 6000u && !R_Cinematic_IsStarted() && !R_Cinematic_IsFinished();
                 const bool stillPlaying = R_Cinematic_IsStarted() && !R_Cinematic_IsFinished();
-                if ( isSolo && elapsed < 90000u && (stillOpening || stillPlaying) )
+                if ( isSolo && elapsed < 240000u && (stillOpening || stillPlaying) )
                 {
                     if ( cl_paused && !cl_paused->current.integer )
                         Dvar_SetInt((dvar_s *)cl_paused, 1);

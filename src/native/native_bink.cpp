@@ -306,11 +306,13 @@ extern "C" int bo1_bink_open(const char *rawPath, Bo1BinkInfo *info)
 
     if (avformat_open_input(&s.fmt, resolved.c_str(), nullptr, nullptr) != 0)
     {
+        fprintf(stderr, "native: bink: avformat_open_input failed for '%s'\n", resolved.c_str());
         FreeSlot(s);
         return 0;
     }
     if (avformat_find_stream_info(s.fmt, nullptr) < 0)
     {
+        fprintf(stderr, "native: bink: avformat_find_stream_info failed for '%s'\n", resolved.c_str());
         FreeSlot(s);
         return 0;
     }

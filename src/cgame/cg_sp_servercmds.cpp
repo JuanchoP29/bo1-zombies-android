@@ -145,6 +145,11 @@ void CG_SP_Start3DCinematicCommand(int localClientNum)
 {
     if (localClientNum)
         return;
+#ifdef BO1_NATIVE
+    // mod (custom): do not let map-init 3D TV cinematics (e.g. Five's War Room) clobber the loading comic/intro.
+    if (Com_IsZombieLoadCinematicActive())
+        return;
+#endif
     R_Cinematic_StartPlayback_SP(Cmd_Argv(1), atoi(Cmd_Argv(2)), 0.0f);
     Dvar_SetBool((dvar_s *)cg_cinematicFullscreen, 0);
 }
@@ -155,6 +160,10 @@ void CG_SP_Stop3DCinematicCommand(int localClientNum)
 {
     if (localClientNum)
         return;
+#ifdef BO1_NATIVE
+    if (Com_IsZombieLoadCinematicActive())
+        return;
+#endif
     R_Cinematic_StopPlayback();
     Dvar_SetBool((dvar_s *)cg_cinematicFullscreen, 1);
 }
