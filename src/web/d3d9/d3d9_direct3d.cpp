@@ -375,15 +375,15 @@ std::vector<D3DDISPLAYMODE> displayModeList()
         if (lines < 480 || lines >= dh)
             continue;
         const UINT width = (dw * lines / dh) & ~1u;
-        bool near = false;
+        bool closeMatch = false;
         for (auto &m : modes) {
             if (m.Width == width && m.Height == lines)
-                near = true;
+                closeMatch = true;
             else if (m.Height <= lines + 24 && lines <= m.Height + 24
                      && m.Width <= width + 48 && width <= m.Width + 48)
-                near = true;
+                closeMatch = true;
         }
-        if (!near && width >= 640)
+        if (!closeMatch && width >= 640)
             modes.push_back({width, lines, 60, D3DFMT_X8R8G8B8});
     }
     // The display's refresh rates (BO1_REFRESH_RATES=60,90,120, set by the Android loader from the display's
