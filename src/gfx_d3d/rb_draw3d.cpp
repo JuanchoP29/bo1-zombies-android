@@ -616,14 +616,17 @@ static void __cdecl R_ShaderWarmingCallback(const void *userData, GfxCmdBufConte
         pool = D3DPOOL_DEFAULT;
         usage = D3DUSAGE_DYNAMIC;
     }
-    if ( FAILED(dx.device->CreateVertexBuffer(0x80u, usage, 0, pool, &vb, 0)) || !vb )
+    // Allocate 3 zeroed vertices (stride 0x80 = 0x180 bytes) so we can emit a degenerate zero-area
+    // D3DPT_TRIANGLELIST instead of D3DPT_POINTLIST: zero rasterized pixels, and exact topology match
+    // for Vulkan/DXVK pipeline pre-compilation on all GPUs (with or without VK_EXT_graphics_pipeline_library).
+    if ( FAILED(dx.device->CreateVertexBuffer(0x180u, usage, 0, pool, &vb, 0)) || !vb )
     {
         Com_PrintWarning(8, "R_ShaderWarming: CreateVertexBuffer failed, no shader warming\n");
         return;
     }
     if ( SUCCEEDED(vb->Lock(0, 0, &verts, 0)) )
     {
-        memset(verts, 0, 0x80u);
+        memset(verts, 0, 0x180u);
         vb->Unlock();
     }
 
@@ -682,7 +685,7 @@ static void __cdecl R_ShaderWarmingCallback(const void *userData, GfxCmdBufConte
                 dx.device->SetStreamSource(0, vb, 0, 0x80u);
                 dx.device->SetStreamSource(1u, vb, 0, 0x80u);
                 dx.device->SetStreamSource(2u, vb, 0, 0x80u);
-                dx.device->DrawPrimitive(D3DPT_POINTLIST, 0, 1u);
+                dx.device->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1u);
                 ++s_shaderWarmingPasses;
             }
         }

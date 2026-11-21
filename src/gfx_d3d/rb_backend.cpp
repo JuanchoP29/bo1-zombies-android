@@ -5801,6 +5801,10 @@ void __cdecl RB_UpdateDynamicBuffers(GfxBackEndData *backendData)
 }
 
 static const void *data; // web: file-local - r_water_sim.cpp has a global 'data' too (MSVC mangles the type in, Itanium does not)
+#ifdef BO1_NATIVE
+extern "C" void bo1_native_perf_register_thread(int role);
+#endif
+
 void     RB_RenderThread(unsigned int threadContext)
 {
     void *Value; // eax
@@ -5810,6 +5814,9 @@ void     RB_RenderThread(unsigned int threadContext)
     int semaphore; // [esp+Ch] [ebp-4h]
 
     iassert(threadContext == THREAD_CONTEXT_BACKEND);
+#ifdef BO1_NATIVE
+    bo1_native_perf_register_thread(1);
+#endif
 
     while ( 1 )
     {

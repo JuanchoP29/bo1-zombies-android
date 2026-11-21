@@ -3372,6 +3372,12 @@ void __cdecl Com_CheckSyncFrame()
 #ifdef BO1_NATIVE
 extern "C" void bo1_native_poll_commands(void);   // mod (native)
 #endif
+#ifdef BO1_NATIVE
+extern "C" void bo1_native_perf_register_thread(int role);
+extern "C" void bo1_native_perf_frame_begin(void);
+extern "C" void bo1_native_perf_frame_end(int targetFps);
+#endif
+
 void __cdecl Com_Frame()
 {
     void *Value; // eax
@@ -3501,6 +3507,17 @@ unsigned int Com_Frame_Try_Block_Function()
             msec = 1;
     }
 
+#ifdef BO1_NATIVE
+    {
+        static bool s_perfMainReg = false;
+        if (!s_perfMainReg)
+        {
+            s_perfMainReg = true;
+            bo1_native_perf_register_thread(0);
+        }
+        bo1_native_perf_frame_begin();
+    }
+#endif
     G_SP_FramePerfMark(FRAMEPERF_BEGIN); // p1: bo1_frameperf whole-frame timing (measurement only)
     for ( localControllerIndex = 0; localControllerIndex < 1; ++localControllerIndex )
         TaskManager2_ProcessTasks(localControllerIndex);
@@ -3581,6 +3598,9 @@ unsigned int Com_Frame_Try_Block_Function()
         for (int localClientNumb = 0; localClientNumb < 1; ++localClientNumb)
             DevGui_Update(localClientNumb, (float)cls.frametime * 0.001);
         Com_Statmon();
+#ifdef BO1_NATIVE
+        bo1_native_perf_frame_end(maxFPS > 0 ? maxFPS : 60);
+#endif
         R_WaitEndTime();
         G_SP_FramePerfMark(FRAMEPERF_END);
     }

@@ -106,6 +106,7 @@ const Row kRows[] = {
     { "RENDERER (RESTART)", CHOICE, "bo1_renderer", 0, 0, 0, 0, kRenderer, 0, 2, ACT_NONE },
     { "NEW SHADERS (RESTART)", CHOICE, "bo1_vk_async", 0, 0, 0, 0, kShaderCompile, 0, 3, ACT_NONE },
 #endif
+    { "SHADER WARMING (MAP LOAD)", CHOICE, "r_shaderWarming", 0, 0, 0, 0, kOffOn, 0, 2, ACT_NONE },
     { "BOT ENEMIES", CHOICE, "bo1_bot_enemies", 0, 0, 0, 0, kBots, 0, 10, ACT_NONE },
     { "BOT FRIENDS", CHOICE, "bo1_bot_friends", 0, 0, 0, 0, kBots, 0, 9, ACT_NONE },
     { "BOT DIFFICULTY", CHOICE, "bo1_bot_difficulty", 0, 0, 0, 0, kDifficulty, 0, 4, ACT_NONE },

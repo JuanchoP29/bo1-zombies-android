@@ -388,6 +388,21 @@ void __cdecl FX_CreateImpactMark(
                 unsigned int markEntnum)
 {
     PROF_SCOPED("FX_CreateImpactMark");
+    // Cap per-frame impact decal clipping to avoid 8+ ms CPU spikes during shotgun/explosion bursts.
+    FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
+    static int s_lastMarkFrame = -1;
+    static int s_frameMarkCount = 0;
+    if (marksSystem)
+    {
+        if (s_lastMarkFrame != marksSystem->frameCount)
+        {
+            s_lastMarkFrame = marksSystem->frameCount;
+            s_frameMarkCount = 0;
+        }
+        if (s_frameMarkCount >= 3)
+            return;
+        ++s_frameMarkCount;
+    }
     FX_CreateImpactMarkInternal(localClientNum, elemDef, spatialFrame, randomSeed, markEntnum);
 }
 

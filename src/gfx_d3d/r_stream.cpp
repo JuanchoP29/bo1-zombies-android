@@ -394,6 +394,11 @@ bool __cdecl R_StreamUpdate_ProcessFileCallbacks()
                 }
                 s_streamImages.loading[imageIndex >> 5] &= ~(1 << (imageIndex & 0x1F));
                 R_Stream_InvalidateRequest(request);
+                // Budget texture reloads to 1 per render-thread frame during active gameplay so bursts of
+                // completed disk reads never stall RB_RenderThread for 100-440 ms at once. Loading screens
+                // (remote screen update active) keep full unlimited throughput.
+                if (Sys_IsRenderThread() && !R_IsRemoteScreenUpdateActive())
+                    break;
             }
         }
     }
