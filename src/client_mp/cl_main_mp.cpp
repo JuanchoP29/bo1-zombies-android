@@ -1347,7 +1347,7 @@ void __cdecl CL_Disconnect(unsigned int localClientNum, bool deactivateClient)
     }
     clientUIActive = CL_GetLocalClientUIGlobals(localClientNum);
 #ifdef BO1_NATIVE
-    if ( Com_IsZombieLoadCinematicActive() )
+    if ( deactivateClient && Com_IsZombieLoadCinematicActive() )
     {
         Com_StopZombieLoadCinematic();
         if ( cl_paused && cl_paused->current.integer )

@@ -7,6 +7,9 @@
 #include <game_sp/g_sp_levelstart.h>
 #include <game_mp/actor_mp.h>
 #include "cg_main_mp.h"
+#ifdef BO1_NATIVE
+#include <qcommon/common.h>
+#endif
 #include <universal/q_shared.h>
 #include <universal/com_memory.h>
 #include <universal/assertive.h>
@@ -4123,7 +4126,10 @@ void __cdecl CG_FreeAnimTreeInstances(int localClientNum)
 
 void __cdecl CG_ShutdownOnceForAllClients()
 {
-    R_Cinematic_StopPlayback();
+#ifdef BO1_NATIVE
+    if ( !Com_IsZombieLoadCinematicActive() )
+#endif
+        R_Cinematic_StopPlayback();
     Com_ShutdownDynamicMemorySystems();
     SND_GameReset();
     CG_SndGameReset();

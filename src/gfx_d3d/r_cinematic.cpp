@@ -14,6 +14,9 @@
 #include <win32/win_net.h>
 #include "rb_state.h"
 #include "r_material_load_obj.h"
+#ifdef BO1_NATIVE
+#include <native_bink.h>
+#endif
 
 struct CinematicGlob // sizeof=0x980
 {                                       // XREF: .data:cinematicGlob/r
@@ -1032,6 +1035,16 @@ char __cdecl R_Cinematic_StartPlayback_Now(const char *filename, unsigned int pl
 {
     unsigned int TrackIDsToPlay[5]; // [esp+1Ch] [ebp-9Ch] BYREF
     char errText[132]; // [esp+30h] [ebp-88h] BYREF
+
+#ifdef BO1_NATIVE
+    // mod (custom): looping 3D cinematics like frontend.bik (interrogation TVs) are requested with flag 8
+    // (MEMORY_RESIDENT rawfile). Stream from main/video/<name>.bik on disk via FFmpeg whenever the file exists.
+    if ( (playbackFlags & 8u) != 0 && bo1_bink_exists(Sys_Cwd(), filename) )
+    {
+        playbackFlags &= ~8u;
+        cinematicGlob.playbackFlags = playbackFlags;
+    }
+#endif
 
     TrackIDsToPlay[0] = 0;
     TrackIDsToPlay[1] = 1;

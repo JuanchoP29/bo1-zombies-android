@@ -1,4 +1,7 @@
 #include "cg_servercmds_mp.h"
+#ifdef BO1_NATIVE
+#include <qcommon/common.h>
+#endif
 #include "cg_actors_mp.h"
 #include <client_mp/cl_cgame_mp.h>
 #include <universal/q_shared.h>
@@ -612,7 +615,10 @@ void __cdecl CG_MapRestart(int localClientNum, int savepersist)
     CL_SyncTimes(localClientNum);
     if ( CL_LocalClient_IsFirstActive(localClientNum) )
     {
-        R_Cinematic_StopPlayback();
+#ifdef BO1_NATIVE
+        if ( !Com_IsZombieLoadCinematicActive() )
+#endif
+            R_Cinematic_StopPlayback();
         Scr_ShutdownSystem(SCRIPTINSTANCE_CLIENT, 1u, 0);
         Scr_InitSystem(SCRIPTINSTANCE_CLIENT, 1);
         Scr_SetLoading(1, SCRIPTINSTANCE_CLIENT);
