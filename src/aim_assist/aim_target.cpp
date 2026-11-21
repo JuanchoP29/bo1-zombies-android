@@ -473,9 +473,9 @@ void __cdecl AimTarget_GetTargetBounds(const centity_s *targetEnt, float *mins, 
         }
         else
         {
-            dobj = Com_GetClientDObj(targetEnt->nextState.number, targetEnt->pose.localClientNum);
-            if ( dobj && (CG_DObjGetWorldTagPos(&targetEnt->pose, dobj, scr_const.aim_highest_bone, highBonePos)
-                          || CG_DObjGetWorldTagPos(&targetEnt->pose, dobj, scr_const.aim_vis_bone, highBonePos)) )
+            DObj *actorDobj = Com_GetClientDObj(targetEnt->nextState.number, targetEnt->pose.localClientNum);
+            if ( actorDobj && (CG_DObjGetWorldTagPos(&targetEnt->pose, actorDobj, scr_const.aim_highest_bone, highBonePos)
+                               || CG_DObjGetWorldTagPos(&targetEnt->pose, actorDobj, scr_const.aim_vis_bone, highBonePos)) )
                 height = highBonePos[2] - targetEnt->pose.origin[2];
             if ( height < 16.0f )
                 height = 16.0f;
