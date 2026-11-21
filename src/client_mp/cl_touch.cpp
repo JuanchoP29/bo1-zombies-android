@@ -338,7 +338,12 @@ void CL_Touch_Draw()
         const float textWidth = (float)R_TextWidth(drawLabel, 0x7FFFFFFF, font);
         if (textWidth * scale > rx * 1.45f && textWidth > 0.0f)
             scale = rx * 1.45f / textWidth;
-        R_AddCmdDrawText(drawLabel, 0x7FFFFFFF, font, cx - textWidth * scale * 0.5f, cy + fontHeight * scale * 0.5f, scale,
+        char textBuf[16];
+        int ti = 0;
+        for (; ti < 15 && drawLabel[ti]; ++ti)
+            textBuf[ti] = drawLabel[ti];
+        textBuf[ti] = '\0';
+        R_AddCmdDrawText(textBuf, 0x7FFFFFFF, font, cx - textWidth * scale * 0.5f, cy + fontHeight * scale * 0.5f, scale,
             scale, 0.0f, ink, 3);
     }
 }
