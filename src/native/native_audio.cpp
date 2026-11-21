@@ -207,6 +207,49 @@ bool s_tried;
 float *s_mix;
 int s_mixFrames;
 
+// mod (custom): stereo float ring buffer for Bink cinematic audio (src/native/native_bink.cpp), mixed into Callback
+constexpr uint32_t kBinkRingFrames = 131072; // ~2.7 s @ 48 kHz
+constexpr uint32_t kBinkRingMask = kBinkRingFrames - 1;
+float *s_binkRing;
+uint32_t s_binkRead;
+uint32_t s_binkWrite;
+double s_binkPos;
+int s_binkRate = kOutRate;
+float s_binkVolume = 0.0f;
+bool s_binkPaused;
+
+void MixBinkAudio(float *mix, int outFrames)
+{
+    if (s_binkPaused || !s_binkRing || s_binkRead == s_binkWrite)
+        return;
+    const double step = (double)s_binkRate / (double)kOutRate;
+    const float vol = s_binkVolume;
+    for (int n = 0; n < outFrames; ++n)
+    {
+        while (s_binkPos >= 1.0 && s_binkRead != s_binkWrite)
+        {
+            s_binkPos -= 1.0;
+            ++s_binkRead;
+        }
+        if (s_binkRead == s_binkWrite)
+        {
+            s_binkPos = 0.0;
+            break;
+        }
+        if (vol > 0.0001f)
+        {
+            const uint32_t i0 = s_binkRead & kBinkRingMask;
+            const uint32_t i1 = ((s_binkRead + 1 != s_binkWrite) ? (s_binkRead + 1) : s_binkRead) & kBinkRingMask;
+            const float f = (float)s_binkPos;
+            const float l = s_binkRing[2 * i0] + (s_binkRing[2 * i1] - s_binkRing[2 * i0]) * f;
+            const float r = s_binkRing[2 * i0 + 1] + (s_binkRing[2 * i1 + 1] - s_binkRing[2 * i0 + 1]) * f;
+            mix[2 * n] += l * vol;
+            mix[2 * n + 1] += r * vol;
+        }
+        s_binkPos += step;
+    }
+}
+
 struct Lock
 {
     Lock() { if (s_device) SDL_LockAudioDevice(s_device); }
@@ -424,6 +467,7 @@ void Callback(void *, Uint8 *stream, int length)
     for (Voice &v : s_voices)
         if (v.open && v.started && !v.paused && v.queued && v.pitch > 0.0f)
             MixVoice(v, s_mix, frames);
+    MixBinkAudio(s_mix, frames);
     int16_t *out = (int16_t *)stream;
     for (int i = 0; i < 2 * frames; ++i)
     {
@@ -587,4 +631,46 @@ extern "C" void bo1_audio_stop(int voice)
     Lock lock;
     WmaFree(voice);
     memset(v, 0, sizeof(*v));
+}
+
+extern "C" void bo1_audio_bink_reset(int sampleRate)
+{
+    bo1_audio_init();
+    Lock lock;
+    s_binkRead = 0;
+    s_binkWrite = 0;
+    s_binkPos = 0.0;
+    s_binkRate = sampleRate > 0 ? sampleRate : kOutRate;
+    s_binkPaused = false;
+}
+
+extern "C" void bo1_audio_bink_push(const float *stereoSamples, int numFrames)
+{
+    if (!stereoSamples || numFrames <= 0)
+        return;
+    Lock lock;
+    if (!s_binkRing)
+    {
+        s_binkRing = (float *)malloc(sizeof(float) * 2 * kBinkRingFrames);
+        if (!s_binkRing)
+            return;
+    }
+    for (int i = 0; i < numFrames; ++i)
+    {
+        if (s_binkWrite - s_binkRead >= kBinkRingFrames - 1)
+            ++s_binkRead; // keep newest audio if ring ever fills
+        const uint32_t idx = s_binkWrite & kBinkRingMask;
+        s_binkRing[2 * idx] = stereoSamples[2 * i];
+        s_binkRing[2 * idx + 1] = stereoSamples[2 * i + 1];
+        ++s_binkWrite;
+    }
+}
+
+extern "C" void bo1_audio_bink_set_state(float volume, int paused)
+{
+    Lock lock;
+    if (volume >= 0.0f)
+        s_binkVolume = volume > 1.0f ? 1.0f : volume;
+    if (paused >= 0)
+        s_binkPaused = paused != 0;
 }

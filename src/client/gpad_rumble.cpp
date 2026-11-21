@@ -61,12 +61,12 @@ static const GPadRumbleProfile s_rumbleProfiles[] =
     { "lmg",          0.40f, 0.55f, 110, 400.0f },
     { "shotgun",      0.60f, 0.80f, 160, 400.0f },
     { "sniper",       0.55f, 0.80f, 160, 400.0f },
-    { "pistol",       0.15f, 0.45f, 90, 300.0f },
-    { "fire",         0.30f, 0.55f, 110, 400.0f },
-    { "melee",        0.55f, 0.50f, 160, 300.0f },
-    { "knife",        0.55f, 0.50f, 160, 300.0f },
-    { "impact",       0.55f, 0.50f, 160, 400.0f },
-    { "reload",       0.10f, 0.30f, 90, 200.0f },
+    { "pistol",       0.25f, 0.55f, 110, 300.0f },
+    { "fire",         0.35f, 0.60f, 120, 400.0f },
+    { "melee",        0.65f, 0.60f, 175, 300.0f },
+    { "knife",        0.65f, 0.60f, 175, 300.0f },
+    { "impact",       0.60f, 0.55f, 165, 400.0f },
+    { "reload",       0.22f, 0.42f, 120, 200.0f },
     { "slide",        0.30f, 0.20f, 300, 300.0f },
 };
 static const GPadRumbleProfile s_rumbleDefault = { "", 0.50f, 0.50f, 250, 750.0f };

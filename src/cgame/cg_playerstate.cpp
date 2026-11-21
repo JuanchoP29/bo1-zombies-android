@@ -17,6 +17,9 @@
 #include <cgame_mp/cg_servercmds_mp.h>
 #include "cg_event.h"
 #include "cg_draw_indicators.h"
+#ifdef BO1_NATIVE
+#include <client/gpad_core.h>
+#endif
 
 void __cdecl CG_Respawn(int localClientNum, int spectate)
 {
@@ -192,6 +195,10 @@ void __cdecl CG_DamageFeedback(int localClientNum, int yawByte, int pitchByte, i
     cgameGlob->damageTime = cgameGlob->snap->serverTime;
     CG_MenuShowNotify(localClientNum, 0);
     CG_DamageShots_Note(localClientNum, yawByte, pitchByte, damage); // L3 TEST SWITCH bo1_shotondamage (KB only)
+#ifdef BO1_NATIVE
+    if ( damage > 0 )
+        GPad_Rumble_Play(damage >= 25 ? "damage_heavy" : "damage_light", false);
+#endif
 }
 
 void __cdecl CG_CheckPlayerstateEvents(int localClientNum, playerState_s *ps, const transPlayerState_t *ops)

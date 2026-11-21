@@ -27,6 +27,9 @@
 #include <xanim/dobj_utils.h>
 #include <gfx_d3d/r_model.h>
 #include <gfx_d3d/r_material.h>
+#ifdef BO1_NATIVE
+#include <gfx_d3d/r_cinematic.h>
+#endif
 #include <client/client.h>
 #include "cl_scrn_mp.h"
 #include <cgame/cg_sp_hud.h>
@@ -1342,6 +1345,27 @@ void __cdecl CL_SetCGameTime(int localClientNum)
         }
         if ( LocalClientGlobals->newSnapshots )
         {
+#ifdef BO1_NATIVE
+            // mod (custom): let the original Zombies comic loading cinematic (.bik) finish in Solo before
+            // dropping straight into Round 1 (keeping the local server paused so zombies don't spawn early).
+            if ( Com_IsZombieLoadCinematicActive() )
+            {
+                const bool isSolo = com_sv_running && com_sv_running->current.enabled
+                    && !Dvar_GetBool("onlinegame") && !Dvar_GetBool("systemlink");
+                const unsigned int elapsed = (unsigned int)(Sys_Milliseconds() - (int)Com_GetZombieLoadCinematicStartMs());
+                const bool stillOpening = elapsed < 2500u && !R_Cinematic_IsStarted() && !R_Cinematic_IsFinished();
+                const bool stillPlaying = R_Cinematic_IsStarted() && !R_Cinematic_IsFinished();
+                if ( isSolo && elapsed < 90000u && (stillOpening || stillPlaying) )
+                {
+                    if ( cl_paused && !cl_paused->current.integer )
+                        Dvar_SetInt((dvar_s *)cl_paused, 1);
+                    return;
+                }
+                Com_StopZombieLoadCinematic();
+                if ( cl_paused && cl_paused->current.integer )
+                    Dvar_SetInt((dvar_s *)cl_paused, 0);
+            }
+#endif
             LocalClientGlobals->newSnapshots = 0;
             CL_FirstSnapshot(localClientNum);
         }

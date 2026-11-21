@@ -940,7 +940,7 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                         CG_PlaySound(localClientNum, p_nextState->otherEntityNum, 0, 0, 0, 1.0, cgMedia.meleeHit);
                     }
 #ifdef BO1_NATIVE
-                    if (isPlayerView)
+                    if (isPlayerView || p_nextState->otherEntityNum == cgameGlob->predictedPlayerState.clientNum)
                     {
                         if (meleeWeaponDef && meleeWeaponDef->meleeImpactRumble && meleeWeaponDef->meleeImpactRumble[0])
                             GPad_Rumble_Play(meleeWeaponDef->meleeImpactRumble, false);
@@ -1146,6 +1146,9 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                         FX_PlayOrientedEffect(localClientNum, weaponDef->projExplosionEffect, cgameGlob->time, position, axis);
                     v25 = SND_FindAliasId((char *)weaponDef->projExplosionSound);
                     CG_PlaySound(localClientNum, 1022, position, 0, 0, 1.0, v25);
+#ifdef BO1_NATIVE
+                    GPad_Rumble_PlayAtPosition("grenade", position, false);
+#endif
                     return;
                 case EV_ROCKET_EXPLODE:
                     goto $LN108;
@@ -1202,6 +1205,9 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                         FX_PlayOrientedEffect(localClientNum, weaponDef->projExplosionEffect, cgameGlob->time, position, axis);
                     v26 = SND_FindAliasId((char *)weaponDef->projExplosionSound);
                     CG_PlaySound(localClientNum, 1022, position, 0, 0, 1.0, v26);
+#ifdef BO1_NATIVE
+                    GPad_Rumble_PlayAtPosition("explosion", position, false);
+#endif
                     cgameGlob->nomarks = 0;
                     return;
                 case EV_FLASHBANG_EXPLODE:

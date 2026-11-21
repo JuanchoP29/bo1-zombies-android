@@ -1346,6 +1346,14 @@ void __cdecl CL_Disconnect(unsigned int localClientNum, bool deactivateClient)
         __debugbreak();
     }
     clientUIActive = CL_GetLocalClientUIGlobals(localClientNum);
+#ifdef BO1_NATIVE
+    if ( Com_IsZombieLoadCinematicActive() )
+    {
+        Com_StopZombieLoadCinematic();
+        if ( cl_paused && cl_paused->current.integer )
+            Dvar_SetInt((dvar_s *)cl_paused, 0);
+    }
+#endif
     if ( CL_LocalClient_IsCUIFlagSet(localClientNum, 2) )
     {
         connstate = CL_GetLocalClientConnectionState(localClientNum);

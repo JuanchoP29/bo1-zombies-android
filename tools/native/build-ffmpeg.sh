@@ -14,8 +14,10 @@ NDK=/bo1/ndk/ndk-r30/android-ndk-r30
 TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64
 API=26
 [ -d $F/src ] || git clone --depth 1 -b $VER https://github.com/FFmpeg/FFmpeg $F/src || exit 1
-COMMON="--disable-everything --disable-programs --disable-doc --disable-avdevice --disable-avformat --disable-swscale
-  --disable-swresample --disable-avfilter --disable-network --disable-autodetect --enable-decoder=wmav2
+COMMON="--disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale
+  --disable-swresample --disable-avfilter --disable-network --disable-autodetect --disable-zlib --disable-bzlib --disable-lzma
+  --enable-avformat --enable-protocol=file --enable-demuxer=bink
+  --enable-decoder=wmav2 --enable-decoder=bink --enable-decoder=binkaudio_rdft --enable-decoder=binkaudio_dct
   --enable-static --disable-shared --enable-pic --disable-debug"
 if [ "$TARGET" = linux ]; then
   OUT=$F/linux

@@ -12,6 +12,10 @@ extern "C" int bo1_native_video_show_pointer(void); // mod (native): src/native/
 #include <client_mp/cl_cgame_mp.h>
 #include "ui_shared.h"
 #include <gfx_d3d/r_rendercmds.h>
+#ifdef BO1_NATIVE
+#include <gfx_d3d/r_cinematic.h>
+#include <gfx_d3d/r_init.h>
+#endif
 #include <client_mp/cl_main_mp.h>
 #include <ui_mp/ui_main_mp.h>
 #include "ui_server.h"
@@ -3861,6 +3865,87 @@ void __cdecl UI_DrawMapLevelshot(int localClientNum)
     {
         __debugbreak();
     }
+#ifdef BO1_NATIVE
+    // mod (custom): in Zombies mode, replace MP's broken connect screen (MENU_INTEL + checkerboard) with:
+    // - Original letterboxed Bink comic video (.bik) when loading a Zombies map (+ subtle bottom bar while loading)
+    // - Clean pitch-black screen with a minimalist BO1-amber progress bar for startup/frontend and maps without .bik
+    if ( bo1_zombies && bo1_zombies->current.enabled )
+    {
+        const float sw = (float)(cls.vidConfig.displayWidth > 0 ? cls.vidConfig.displayWidth : 1280);
+        const float sh = (float)(cls.vidConfig.displayHeight > 0 ? cls.vidConfig.displayHeight : 720);
+        UI_FillRectPhysical(0.0f, 0.0f, sw, sh, colorBlack);
+
+        const bool comicActive = Com_IsZombieLoadCinematicActive();
+        if ( comicActive && rgp.cinematicMaterial && R_Cinematic_HasActiveFrame() )
+        {
+            unsigned int vw = 16, vh = 9;
+            R_Cinematic_GetDimensions(&vw, &vh);
+            const float videoAspect = (vw > 0 && vh > 0) ? ((float)vw / (float)vh) : (16.0f / 9.0f);
+            const float screenAspect = sw / sh;
+            float drawW = sw, drawH = sh, drawX = 0.0f, drawY = 0.0f;
+            if ( screenAspect > videoAspect )
+            {
+                drawW = sh * videoAspect;
+                drawX = (sw - drawW) * 0.5f;
+            }
+            else if ( screenAspect < videoAspect )
+            {
+                drawH = sw / videoAspect;
+                drawY = (sh - drawH) * 0.5f;
+            }
+            CL_DrawStretchPicPhysical(drawX, drawY, drawW, drawH, 0.0f, 0.0f, 1.0f, 1.0f, colorWhite, rgp.cinematicMaterial);
+        }
+
+        float frac = useFastFile && useFastFile->current.enabled ? DB_GetLoadedFraction() : 0.0f;
+        if ( frac < 0.0f )
+            frac = 0.0f;
+        if ( frac > 1.0f )
+            frac = 1.0f;
+
+        // On comic screens, show the subtle amber bar only while fastfiles are actively streaming; once 100%, let
+        // the comic finish cleanly unobstructed. On frontend / no-comic screens, always show the minimalist BO1 bar.
+        if ( !comicActive || frac < 0.995f )
+        {
+            const float barW = sw * (comicActive ? 0.30f : 0.36f);
+            const float barH = comicActive
+                ? (sh * 0.0045f < 4.0f ? 4.0f : sh * 0.0045f)
+                : (sh * 0.0065f < 6.0f ? 6.0f : sh * 0.0065f);
+            const float barX = (sw - barW) * 0.5f;
+            const float barY = comicActive ? (sh - barH - sh * 0.024f) : (sh * 0.85f);
+            const float pad = 1.5f;
+
+            static const float kBorderCol[4] = { 0.62f, 0.38f, 0.08f, 0.65f };
+            static const float kTrackCol[4]  = { 0.09f, 0.07f, 0.05f, 0.88f };
+            static const float kAmberFill[4] = { 0.95f, 0.56f, 0.08f, 1.00f };
+            static const float kAmberGlow[4] = { 1.00f, 0.82f, 0.42f, 0.75f };
+
+            UI_FillRectPhysical(barX - pad, barY - pad, barW + pad * 2.0f, barH + pad * 2.0f, kBorderCol);
+            UI_FillRectPhysical(barX, barY, barW, barH, kTrackCol);
+
+            if ( frac > 0.005f )
+            {
+                const float fillW = barW * frac;
+                UI_FillRectPhysical(barX, barY, fillW, barH, kAmberFill);
+                UI_FillRectPhysical(barX, barY, fillW, barH * 0.30f, kAmberGlow);
+            }
+            else
+            {
+                // Smooth minimalist BO1 amber sweep before fastfile streaming begins
+                const float t = (float)(Sys_Milliseconds() % 1400) / 1400.0f;
+                const float segW = barW * 0.24f;
+                const float pos = t * (barW + segW) - segW;
+                const float x0 = pos < 0.0f ? 0.0f : pos;
+                const float x1 = (pos + segW) > barW ? barW : (pos + segW);
+                if ( x1 > x0 )
+                {
+                    UI_FillRectPhysical(barX + x0, barY, x1 - x0, barH, kAmberFill);
+                    UI_FillRectPhysical(barX + x0, barY, x1 - x0, barH * 0.30f, kAmberGlow);
+                }
+            }
+        }
+        return;
+    }
+#endif
     uiInfo = UI_GetInfo(localClientNum);
     menu = Menus_FindByName(&uiInfo->uiDC, "pregame_loaderror_mp");
     if ( !menu || !Menus_MenuIsInStack(&uiInfo->uiDC, menu) )

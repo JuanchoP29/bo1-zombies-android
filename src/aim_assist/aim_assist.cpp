@@ -910,6 +910,17 @@ int __cdecl AimAssist_CalcAimPos(
     }
     if ( targetEnt->nextState.eType == 1 )
         return AimTarget_GetTagPos(localClientNum, targetEnt, scr_const.aim_bone, aimPos);
+#ifdef BO1_NATIVE
+    // mod (custom): in Zombies, zombies are ET_ACTOR (eType == 17). Snap to upper chest (j_spine4) like console
+    // BO1/BO2 instead of falling through to the geometric box center (waist/hip). Non-humanoids (dogs) lack
+    // j_spine4 and cleanly fall back to the box center below without erroring.
+    if ( targetEnt->nextState.eType == 17 )
+    {
+        DObj *dobj = Com_GetClientDObj(targetEnt->nextState.number, localClientNum);
+        if ( dobj && CG_DObjGetWorldTagPos(&targetEnt->pose, dobj, scr_const.aim_bone, aimPos) )
+            return 1;
+    }
+#endif
     if ( !target )
         return 0;
     center_4 = (float)(target->mins[1] + target->maxs[1]) * 0.5;

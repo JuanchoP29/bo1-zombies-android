@@ -1031,6 +1031,13 @@ char __cdecl SCR_ShouldSkipUpdateScreen()
         s_lastUpdateScreenTime = timeNow;
         return 0;
     }
+    if ( Com_IsZombieLoadCinematicActive() )
+    {
+        if ( (int)(timeNow - s_lastUpdateScreenTime) < 15 )
+            return 1;
+        s_lastUpdateScreenTime = timeNow;
+        return 0;
+    }
 #endif
     if ( (int)(timeNow - s_lastUpdateScreenTime) < (clcState < 8 ? 16 : 33) )
         return 1;

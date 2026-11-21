@@ -199,6 +199,12 @@ void __cdecl Com_WriteDefaults_f();
 double __cdecl Com_GetTimescaleForSnd();
 void Com_LoadUiFastFile();
 void __cdecl Com_LoadMapLoadingScreenFastFile(const char *mapName);
+#ifdef BO1_NATIVE
+void Com_StartZombieLoadCinematic(const char *mapName);
+void Com_StopZombieLoadCinematic();
+bool Com_IsZombieLoadCinematicActive();
+unsigned int Com_GetZombieLoadCinematicStartMs();
+#endif
 void __cdecl Com_UnloadLevelFastFiles();
 void __cdecl Com_LoadLevelFastFiles(char *mapName);
 char *__cdecl Com_GetLevelSharedFastFile(char *mapName);

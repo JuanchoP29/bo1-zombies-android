@@ -203,6 +203,10 @@ set(BO1_NATIVE_FFMPEG "" CACHE PATH "FFmpeg build with the wmav2 decoder; empty 
 if (BO1_NATIVE_FFMPEG)
     target_compile_definitions(${BIN_NAME} PRIVATE BO1_FFMPEG)
     target_include_directories(${BIN_NAME} PRIVATE "${BO1_NATIVE_FFMPEG}/include")
+    if (EXISTS "${BO1_NATIVE_FFMPEG}/lib/libavformat.a")
+        target_compile_definitions(${BIN_NAME} PRIVATE BO1_FFMPEG_BINK)
+        target_link_libraries(${BIN_NAME} PRIVATE "${BO1_NATIVE_FFMPEG}/lib/libavformat.a")
+    endif()
     target_link_libraries(${BIN_NAME} PRIVATE "${BO1_NATIVE_FFMPEG}/lib/libavcodec.a" "${BO1_NATIVE_FFMPEG}/lib/libavutil.a")
 endif()
 

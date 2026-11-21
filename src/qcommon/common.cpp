@@ -19,6 +19,10 @@
 #include <gfx_d3d/r_extracam.h>
 #include <gfx_d3d/r_ui3d.h>
 #include <gfx_d3d/rb_resource.h>
+#ifdef BO1_NATIVE
+#include <gfx_d3d/r_cinematic.h>
+#include <native_bink.h>
+#endif
 #include <glass/glass_client.h>
 #include <demo/demo_playback.h>
 #include <stringed/stringed_hooks.h>
@@ -2888,6 +2892,63 @@ void Com_LoadUiFastFile()
     }
 }
 
+#ifdef BO1_NATIVE
+static bool s_zombieLoadCineActive;
+static char s_zombieLoadCineName[96];
+static unsigned int s_zombieLoadCineStartMs;
+
+void Com_StopZombieLoadCinematic()
+{
+    if ( s_zombieLoadCineActive )
+    {
+        s_zombieLoadCineActive = false;
+        s_zombieLoadCineName[0] = 0;
+        R_Cinematic_StopPlayback();
+    }
+}
+
+void Com_StartZombieLoadCinematic(const char *mapName)
+{
+    if ( IsDedicatedServer() || !bo1_zombies || !bo1_zombies->current.enabled )
+        return;
+    if ( !mapName || !mapName[0] || !Com_IsZombieMap(mapName) )
+    {
+        Com_StopZombieLoadCinematic();
+        return;
+    }
+    char cineName[96];
+    Com_sprintf(cineName, sizeof(cineName), "%s_load", mapName);
+    if ( s_zombieLoadCineActive && !I_stricmp(s_zombieLoadCineName, cineName) )
+        return;
+    const char *basePath = fs_basepath ? fs_basepath->current.string : "";
+    if ( !bo1_bink_exists(basePath, cineName) )
+    {
+        Com_StopZombieLoadCinematic();
+        return;
+    }
+    const dvar_t *sndVol = Dvar_FindVar("snd_volume");
+    float vol = sndVol ? sndVol->current.value : 0.8f;
+    if ( vol < 0.0f )
+        vol = 0.0f;
+    if ( vol > 1.0f )
+        vol = 1.0f;
+    R_Cinematic_StartPlayback_SP(cineName, 0, vol);
+    s_zombieLoadCineActive = true;
+    I_strncpyz(s_zombieLoadCineName, cineName, sizeof(s_zombieLoadCineName));
+    s_zombieLoadCineStartMs = Sys_Milliseconds();
+}
+
+bool Com_IsZombieLoadCinematicActive()
+{
+    return s_zombieLoadCineActive;
+}
+
+unsigned int Com_GetZombieLoadCinematicStartMs()
+{
+    return s_zombieLoadCineStartMs;
+}
+#endif
+
 void __cdecl Com_LoadMapLoadingScreenFastFile(const char *mapName)
 {
     if (!IsDedicatedServer())
@@ -2897,6 +2958,9 @@ void __cdecl Com_LoadMapLoadingScreenFastFile(const char *mapName)
         if (useFastFile->current.enabled)
             DB_ReleaseXAssets();
         UI_SetLoadingScreenMaterial(mapName);
+#ifdef BO1_NATIVE
+        Com_StartZombieLoadCinematic(mapName);
+#endif
     }
 }
 
@@ -2926,6 +2990,9 @@ void __cdecl Com_LoadLevelFastFiles(char *mapName)
     zoneCount = 0;
     DB_ResetZoneSize(0);
     UI_SetLoadingScreenMaterial(mapName);
+#ifdef BO1_NATIVE
+    Com_StartZombieLoadCinematic(mapName);
+#endif
     Com_sprintf(levelPatchZoneName, 0x40u, "%s_patch", mapName);
     ControllerIndex = Com_LocalClient_GetControllerIndex(0);
     Cbuf_ExecuteBuffer(0, ControllerIndex, (char *)"ui_animate connect * meet 500 1;\n");

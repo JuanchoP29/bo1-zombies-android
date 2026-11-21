@@ -426,7 +426,11 @@ void __cdecl AimTarget_GetTargetBounds(const centity_s *targetEnt, float *mins, 
         __debugbreak();
     if ( !maxs && !Assert_MyHandler("C:\\projects_pc\\cod\\codsrc\\src\\aim_assist\\aim_target.cpp", 429, 0, "%s", "maxs") )
         __debugbreak();
-    if ( targetEnt->nextState.eType == 17 )
+    const bool isDogActor = (targetEnt->nextState.eType == 17)
+        && (!(zombiemode && zombiemode->current.enabled)
+            || targetEnt->nextState.lerp.u.actor.species == 1
+            || targetEnt->nextState.lerp.u.actor.species == 3);
+    if ( isDogActor )
     {
         AimTarget_GetTagPos_0(targetEnt, scr_const.aim_highest_bone, highBonePos);
         AngleVectors(targetEnt->pose.angles, forward, right, 0);
@@ -461,16 +465,28 @@ void __cdecl AimTarget_GetTargetBounds(const centity_s *targetEnt, float *mins, 
     }
     else if ( targetEnt->nextState.eType == 1 || targetEnt->nextState.eType == 17 )
     {
-        AimTarget_GetTagPos_0(targetEnt, scr_const.aim_highest_bone, highBonePos);
-        //*(unsigned int *)mins = aim_target_sentient_radius->current.integer ^ _mask__NegFloat_;
-        //*((unsigned int *)mins + 1) = aim_target_sentient_radius->current.integer ^ _mask__NegFloat_;
-        mins[0] = -aim_target_sentient_radius->current.integer;
-        mins[1] = -aim_target_sentient_radius->current.integer;
+        float height = 60.0f;
+        if ( targetEnt->nextState.eType == 1 )
+        {
+            AimTarget_GetTagPos_0(targetEnt, scr_const.aim_highest_bone, highBonePos);
+            height = highBonePos[2] - targetEnt->pose.origin[2];
+        }
+        else
+        {
+            dobj = Com_GetClientDObj(targetEnt->nextState.number, targetEnt->pose.localClientNum);
+            if ( dobj && (CG_DObjGetWorldTagPos(&targetEnt->pose, dobj, scr_const.aim_highest_bone, highBonePos)
+                          || CG_DObjGetWorldTagPos(&targetEnt->pose, dobj, scr_const.aim_vis_bone, highBonePos)) )
+                height = highBonePos[2] - targetEnt->pose.origin[2];
+            if ( height < 16.0f )
+                height = 16.0f;
+        }
+        mins[0] = -aim_target_sentient_radius->current.value;
+        mins[1] = -aim_target_sentient_radius->current.value;
         mins[2] = 0.0f;
 
         maxs[0] = aim_target_sentient_radius->current.value;
         maxs[1] = aim_target_sentient_radius->current.value;
-        maxs[2] = highBonePos[2] - targetEnt->pose.origin[2];
+        maxs[2] = height;
     }
     else if (targetEnt->nextState.solid == 0xFFFFFF)
     {

@@ -507,7 +507,7 @@ void __cdecl R_Cinematic_ReleaseImages(CinematicTextureSet *textureSet)
     Image_Release(&textureSet->drawImageA);
 }
 
-void __cdecl R_Cinematic_StartPlayback_Internal(const char *name, unsigned int playbackFlags, int volume)
+void __cdecl R_Cinematic_StartPlayback_Internal(const char *name, unsigned int playbackFlags, float volume)
 {
     Sys_EnterCriticalSection(CRITSECT_CINEMATIC_TARGET_CHANGE);
     I_strncpyz(cinematicGlob.targetCinematicName, name, 256);
@@ -1121,6 +1121,8 @@ char __cdecl R_Cinematic_StartPlayback_Now(const char *filename, unsigned int pl
         BinkRegisterFrameBuffers(cinematicGlob.bink, &cinematicGlob.binkTextureSet.bink_buffers);
         R_Cinematic_CheckBinkError();
         cinematicGlob.currentPaused = CINEMATIC_NOT_PAUSED;
+        cinematicGlob.startTimeMS = Sys_Milliseconds();
+        cinematicGlob.frameNum = 1;
         return 1;
     }
     else
@@ -1646,7 +1648,7 @@ float __cdecl R_Cinematic_GetTimeRemaining()
 void __cdecl R_Cinematic_StartPlayback_SP(const char *name, unsigned int playbackFlags, float volume)
 {
     Sys_EnterCriticalSection(CRITSECT_CINEMATIC);
-    R_Cinematic_StartPlayback_Internal(name, playbackFlags, (int)volume);
+    R_Cinematic_StartPlayback_Internal(name, playbackFlags, volume);
     Sys_LeaveCriticalSection(CRITSECT_CINEMATIC);
 }
 
@@ -1694,5 +1696,28 @@ void __cdecl R_Cinematic_ForceRelinquishIO()
 {
     if (cinematicGlob.fileIoState)
         R_Cinematic_RelinquishIO();
+}
+
+bool __cdecl R_Cinematic_HasActiveFrame()
+{
+    return cinematicGlob.activeImageFrame != -1 && cinematicGlob.bink != 0;
+}
+
+void __cdecl R_Cinematic_GetDimensions(unsigned int *outWidth, unsigned int *outHeight)
+{
+    if (cinematicGlob.bink)
+    {
+        if (outWidth)
+            *outWidth = cinematicGlob.bink->Width;
+        if (outHeight)
+            *outHeight = cinematicGlob.bink->Height;
+    }
+    else
+    {
+        if (outWidth)
+            *outWidth = 16;
+        if (outHeight)
+            *outHeight = 9;
+    }
 }
 
