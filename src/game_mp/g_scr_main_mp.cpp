@@ -13873,8 +13873,6 @@ void __cdecl GScr_RagdollLaunch(scr_entref_t entref)
     gentity_s *ent; // [esp+10h] [ebp-4h]
 
     ent = GetEntity(entref);
-    // L30 measurement: SP G_m_launchragdoll 0x004BBFD0 makes the event only for trType 12..14 (the same test)
-    Com_Printf(16, "bo1_launchragdoll: time %d ent %d trType %d\n", level.time, ent->s.number, (int)ent->s.lerp.pos.trType);
     if ( Com_IsRagdollTrajectory(&ent->s.lerp.pos) )
     {
         Scr_GetVector(0, force, SCRIPTINSTANCE_SERVER);

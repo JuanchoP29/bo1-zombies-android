@@ -3376,6 +3376,7 @@ extern "C" void bo1_native_poll_commands(void);   // mod (native)
 extern "C" void bo1_native_perf_register_thread(int role);
 extern "C" void bo1_native_perf_frame_begin(void);
 extern "C" void bo1_native_perf_frame_end(int targetFps);
+extern "C" void bo1_native_perf_pace_frame(int maxFps);
 #endif
 
 void __cdecl Com_Frame()
@@ -3481,6 +3482,24 @@ unsigned int Com_Frame_Try_Block_Function()
     }
     else
     {
+#ifdef BO1_NATIVE
+        // Measure true elapsed milliseconds for simulation; exact sub-millisecond FPS pacing runs in
+        // bo1_native_perf_pace_frame() at the end of the frame (avoiding 1000/60 = 16 ms = 62.5 FPS integer drift).
+        for (int i = 0; i < 50; ++i)
+        {
+            Com_EventLoop();
+            com_frameTime = Sys_Milliseconds();
+            if (com_frameTime - com_lastFrameTime[lastFrameIndex] < 0)
+                com_lastFrameTime[lastFrameIndex] = com_frameTime;
+            if (com_frameTime - com_lastFrameTime[lastFrameIndex] > 0)
+                break;
+            NET_Sleep(1u);
+        }
+        msec = com_frameTime - com_lastFrameTime[lastFrameIndex];
+        if (msec < 1)
+            msec = 1;
+        com_lastFrameTime[lastFrameIndex] = com_frameTime;
+#else
         // adapted from kcod4
         for (int i = 0; i < 50; ++i)
         {
@@ -3505,6 +3524,7 @@ unsigned int Com_Frame_Try_Block_Function()
         msec = lastFrameIndex + v4;
         if (!(lastFrameIndex + v4))
             msec = 1;
+#endif
     }
 
 #ifdef BO1_NATIVE
@@ -3599,9 +3619,11 @@ unsigned int Com_Frame_Try_Block_Function()
             DevGui_Update(localClientNumb, (float)cls.frametime * 0.001);
         Com_Statmon();
 #ifdef BO1_NATIVE
-        bo1_native_perf_frame_end(maxFPS > 0 ? maxFPS : 60);
-#endif
+        bo1_native_perf_frame_end(maxFPS);
+        bo1_native_perf_pace_frame(maxFPS);
+#else
         R_WaitEndTime();
+#endif
         G_SP_FramePerfMark(FRAMEPERF_END);
     }
     

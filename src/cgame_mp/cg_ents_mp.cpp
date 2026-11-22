@@ -3318,7 +3318,7 @@ void __cdecl CG_CalcEntityRagdollPositions(int localClientNum, centity_s *cent)
     }
     else
     {
-        if ( !cent->pose.ragdollHandle && !cent->pose.killcamRagdollHandle )
+        if ( !cent->pose.isRagdoll && !cent->pose.ragdollHandle && !cent->pose.killcamRagdollHandle )
             CG_CreateRagdollObject(localClientNum, cent);
         if ( cent->pose.ragdollHandle > 0 || cent->pose.killcamRagdollHandle > 0 )
             CG_UpdateRagdollPose(cent);

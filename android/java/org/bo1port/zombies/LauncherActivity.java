@@ -896,7 +896,7 @@ public class LauncherActivity extends Activity {
                 });
 
         addSpinnerRow(card, "Nuevos Shaders Vulkan", new String[] {
-                "Esperar (sin parpadeo)", "Efectos en 2do plano", "Todo en 2do plano"
+                "Esperar (sin parpadeo)", "Efectos en 2do plano", "Todo en 2do plano (Sin tirones)"
         }, vkAsync, new IntConsumer() {
             @Override
             public void accept(int v) {

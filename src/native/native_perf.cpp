@@ -8,6 +8,7 @@
 // -1 when none can be read (desktop Linux, a phone that denies the files).
 //
 // This file is not rewritten (tools/p32).
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,6 +85,61 @@ extern "C" double bo1_native_seconds(void)
     return Seconds(CLOCK_MONOTONIC);
 }
 
+namespace
+{
+int64_t MonotonicNs()
+{
+    timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+}
+
+int64_t s_paceNextNs = 0;
+int s_paceLastFps = 0;
+} // namespace
+
+// Precision sub-millisecond frame pacer (CLOCK_MONOTONIC).
+// Eliminates integer-millisecond drift (e.g. 1000/60 = 16 ms = 62.5 FPS beating against a 60/120 Hz display)
+// and wakes cleanly before the deadline to avoid OS timer-slack overshoot.
+extern "C" void bo1_native_perf_pace_frame(int maxFps)
+{
+    if (maxFps <= 0 || maxFps > 500)
+    {
+        s_paceNextNs = 0;
+        s_paceLastFps = 0;
+        return;
+    }
+    const int64_t targetNs = 1000000000LL / (int64_t)maxFps;
+    int64_t now = MonotonicNs();
+    if (s_paceNextNs == 0 || s_paceLastFps != maxFps)
+    {
+        s_paceLastFps = maxFps;
+        s_paceNextNs = now + targetNs;
+        return;
+    }
+    while (now < s_paceNextNs)
+    {
+        const int64_t rem = s_paceNextNs - now;
+        if (rem > 1500000LL)
+        {
+            const int64_t wakeNs = s_paceNextNs - 1000000LL;
+            timespec ts;
+            ts.tv_sec = (time_t)(wakeNs / 1000000000LL);
+            ts.tv_nsec = (long)(wakeNs % 1000000000LL);
+            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr);
+        }
+        else if (rem > 150000LL)
+        {
+            sched_yield();
+        }
+        now = MonotonicNs();
+    }
+    if (now - s_paceNextNs > (targetNs >> 1))
+        s_paceNextNs = now + targetNs; // resync after hitch/loading without bursting frames
+    else
+        s_paceNextNs += targetNs;      // lock exact phase (60.000 / 90.000 / 120.000 FPS)
+}
+
 // Universal Android Dynamic Performance Framework (ADPF, API 31+ loaded dynamically via dlsym so Android 8-11
 // devices simply skip it without error) + modest thread priority boost for main and render threads.
 #ifdef __ANDROID__
@@ -100,6 +156,7 @@ using AdpfSetThreadsFn = int (*)(APerformanceHintSession *, const int32_t *, siz
 
 pthread_mutex_t s_adpfMutex = PTHREAD_MUTEX_INITIALIZER;
 bool s_adpfInitTried = false;
+bool s_adpfCreateLogged = false;
 APerformanceHintManager *s_adpfMgr = nullptr;
 APerformanceHintSession *s_adpfSession = nullptr;
 AdpfCreateSessionFn s_adpfCreate = nullptr;
@@ -109,12 +166,33 @@ AdpfSetThreadsFn s_adpfSetThreads = nullptr;
 int32_t s_adpfTids[3] = { 0, 0, 0 }; // 0 = main, 1 = render, 2 = server
 int64_t s_adpfTargetNs = 16666667LL;
 int64_t s_frameStartNs = 0;
+int s_adpfDefaultFps = 0;
+int s_adpfFramesWithoutSession = 0;
 
-int64_t MonotonicNs()
+int AdpfDefaultFps()
 {
-    timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    if (s_adpfDefaultFps > 0)
+        return s_adpfDefaultFps;
+    int best = 60;
+    const char *rates = getenv("BO1_REFRESH_RATES");
+    if (rates && *rates)
+    {
+        const char *p = rates;
+        while (*p)
+        {
+            while (*p && (*p < '0' || *p > '9'))
+                ++p;
+            if (!*p)
+                break;
+            int hz = atoi(p);
+            if (hz >= 30 && hz <= 240 && hz > best)
+                best = hz;
+            while (*p >= '0' && *p <= '9')
+                ++p;
+        }
+    }
+    s_adpfDefaultFps = best;
+    return best;
 }
 
 void AdpfLoadLocked()
@@ -123,18 +201,27 @@ void AdpfLoadLocked()
         return;
     s_adpfInitTried = true;
     void *lib = dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
-    if (!lib)
+    void *symHandle = lib ? lib : RTLD_DEFAULT;
+    auto getMgr = (AdpfGetManagerFn)dlsym(symHandle, "APerformanceHint_getManager");
+    s_adpfCreate = (AdpfCreateSessionFn)dlsym(symHandle, "APerformanceHint_createSession");
+    s_adpfUpdateTarget = (AdpfUpdateTargetFn)dlsym(symHandle, "APerformanceHint_updateTargetWorkDuration");
+    s_adpfReportActual = (AdpfReportActualFn)dlsym(symHandle, "APerformanceHint_reportActualWorkDuration");
+    s_adpfSetThreads = (AdpfSetThreadsFn)dlsym(symHandle, "APerformanceHint_setThreads");
+    if (!getMgr || !s_adpfCreate || !s_adpfReportActual)
+    {
+        fprintf(stderr, "native: ADPF unavailable (symbols missing on this Android version)\n");
+        fflush(stderr);
         return;
-    auto getMgr = (AdpfGetManagerFn)dlsym(lib, "APerformanceHint_getManager");
-    s_adpfCreate = (AdpfCreateSessionFn)dlsym(lib, "APerformanceHint_createSession");
-    s_adpfUpdateTarget = (AdpfUpdateTargetFn)dlsym(lib, "APerformanceHint_updateTargetWorkDuration");
-    s_adpfReportActual = (AdpfReportActualFn)dlsym(lib, "APerformanceHint_reportActualWorkDuration");
-    s_adpfSetThreads = (AdpfSetThreadsFn)dlsym(lib, "APerformanceHint_setThreads");
-    if (getMgr && s_adpfCreate && s_adpfReportActual)
-        s_adpfMgr = getMgr();
+    }
+    s_adpfMgr = getMgr();
+    if (!s_adpfMgr)
+    {
+        fprintf(stderr, "native: ADPF unavailable (APerformanceHint_getManager returned null)\n");
+        fflush(stderr);
+    }
 }
 
-void AdpfSyncSessionLocked()
+void AdpfSyncSessionLocked(bool allowSingleThread)
 {
     if (!s_adpfMgr)
         return;
@@ -142,20 +229,47 @@ void AdpfSyncSessionLocked()
     size_t count = 0;
     for (int i = 0; i < 3; ++i)
     {
-        if (s_adpfTids[i] > 0)
-            list[count++] = s_adpfTids[i];
+        const int32_t tid = s_adpfTids[i];
+        if (tid <= 0)
+            continue;
+        bool dup = false;
+        for (size_t j = 0; j < count; ++j)
+        {
+            if (list[j] == tid)
+            {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup)
+            list[count++] = tid;
     }
     if (count == 0)
         return;
     if (!s_adpfSession)
     {
-        // Create session once both main & render threads are registered (or on first frame if single-threaded).
-        if (s_adpfTids[0] > 0 && s_adpfTids[1] > 0)
+        if ((s_adpfTids[0] > 0 && s_adpfTids[1] > 0) || (allowSingleThread && s_adpfTids[0] > 0))
         {
             s_adpfSession = s_adpfCreate(s_adpfMgr, list, count, s_adpfTargetNs);
+            if (!s_adpfSession && count > 1)
+            {
+                // Some OEM PowerHALs reject multi-thread hint sessions; fall back to main thread only.
+                s_adpfSession = s_adpfCreate(s_adpfMgr, list, 1, s_adpfTargetNs);
+                if (s_adpfSession)
+                    count = 1;
+            }
             if (s_adpfSession)
+            {
                 fprintf(stderr, "native: ADPF performance hint session active (%zu threads, target %.2f ms)\n",
                     count, (double)s_adpfTargetNs / 1e6);
+                fflush(stderr);
+            }
+            else if (!s_adpfCreateLogged)
+            {
+                s_adpfCreateLogged = true;
+                fprintf(stderr, "native: ADPF createSession returned null (%zu threads)\n", count);
+                fflush(stderr);
+            }
         }
     }
     else if (s_adpfSetThreads)
@@ -177,7 +291,7 @@ extern "C" void bo1_native_perf_register_thread(int role)
     {
         s_adpfTids[role] = tid;
         AdpfLoadLocked();
-        AdpfSyncSessionLocked();
+        AdpfSyncSessionLocked(false);
     }
     pthread_mutex_unlock(&s_adpfMutex);
 }
@@ -189,9 +303,15 @@ extern "C" void bo1_native_perf_frame_begin(void)
 
 extern "C" void bo1_native_perf_frame_end(int targetFps)
 {
+    if (!s_adpfSession && s_adpfMgr && !s_adpfCreateLogged && ++s_adpfFramesWithoutSession == 60)
+    {
+        pthread_mutex_lock(&s_adpfMutex);
+        AdpfSyncSessionLocked(true);
+        pthread_mutex_unlock(&s_adpfMutex);
+    }
     if (!s_adpfSession || !s_adpfReportActual || s_frameStartNs <= 0)
         return;
-    const int fps = (targetFps >= 30 && targetFps <= 240) ? targetFps : 60;
+    const int fps = (targetFps >= 30 && targetFps <= 240) ? targetFps : AdpfDefaultFps();
     const int64_t targetNs = 1000000000LL / (int64_t)fps;
     if (targetNs != s_adpfTargetNs && s_adpfUpdateTarget)
     {

@@ -1714,7 +1714,7 @@ char __cdecl MSG_WriteDeltaField(
         {
             __debugbreak();
         }
-        if ( field->changeHints == 1 && (!snapInfo->fromBaseline || fieldNum) )
+        if ( field->changeHints == 1 && (!snapInfo->fromBaseline || fieldNum) && com_developer && com_developer->current.integer > 0 )
         {
             if ( snapInfo->packetEntityTypeArchived )
                 v14 = "archived";

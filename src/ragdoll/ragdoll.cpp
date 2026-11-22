@@ -185,7 +185,12 @@ const RagdollBody *__cdecl Ragdoll_CreateRagdollForDObj(
     }
     else
     {
-        Com_Printf(20, "Ragdoll allocation failed, out of ragdoll bodies (obj %d)\n", dobj);
+        static int s_ragdollFailLogs = 0;
+        if ( s_ragdollFailLogs < 3 )
+        {
+            ++s_ragdollFailLogs;
+            Com_Printf(20, "Ragdoll allocation failed, out of ragdoll bodies (obj %d)\n", dobj);
+        }
         return 0;
     }
 }

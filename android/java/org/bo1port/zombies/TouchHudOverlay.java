@@ -40,6 +40,8 @@ public final class TouchHudOverlay extends View {
 
     private final TouchHudRenderer renderer = new TouchHudRenderer();
     private final float[] buf = new float[160];
+    private final float[] lastBuf = new float[160];
+    private int lastN = -1;
     private volatile boolean nativesReady = false;
     private volatile boolean running = true;
     private int currentMode = 0;
@@ -66,11 +68,62 @@ public final class TouchHudOverlay extends View {
             if (!running) {
                 return;
             }
-            if (nativesReady) {
-                invalidate();
-                postOnAnimation(this);
-            } else {
+            if (!nativesReady) {
                 postDelayed(this, 150);
+                return;
+            }
+            int n;
+            try {
+                n = Bo1Activity.touchHudRead(buf);
+            } catch (Throwable t) {
+                postDelayed(this, 120);
+                return;
+            }
+            boolean changed = (n != lastN);
+            if (!changed && n > 0) {
+                for (int i = 0; i < n; i++) {
+                    if (Math.abs(buf[i] - lastBuf[i]) > 0.0005f) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            int mode = (n >= 12) ? Math.round(buf[0]) : 0;
+            if (currentMode == 1 && mode != 1) {
+                releaseMenuKeys();
+                changed = true;
+            }
+            currentMode = mode;
+            if (changed) {
+                if (n > 0) {
+                    System.arraycopy(buf, 0, lastBuf, 0, n);
+                }
+                lastN = n;
+                invalidate();
+            }
+
+            // Adaptive poll rate: VSync-locked only while fingers actively move touch HUD;
+            // low-frequency poll with ZERO UI redraws when idle or playing with a gamepad.
+            if (mode == 2) {
+                boolean activeTouch = (n >= 12 && buf[4] > 0.5f);
+                if (!activeTouch && n >= 12) {
+                    int btnCount = Math.round(buf[11]);
+                    int pos = 12;
+                    for (int i = 0; i < btnCount && pos + 6 <= n; i++) {
+                        if (buf[pos + 4] > 0.5f) {
+                            activeTouch = true;
+                            break;
+                        }
+                        pos += 6;
+                    }
+                }
+                if (activeTouch || changed) {
+                    postOnAnimation(this);
+                } else {
+                    postDelayed(this, 32);
+                }
+            } else {
+                postDelayed(this, 120);
             }
         }
     };
@@ -257,18 +310,21 @@ public final class TouchHudOverlay extends View {
         if (!nativesReady) {
             return;
         }
-        int n;
-        try {
-            n = Bo1Activity.touchHudRead(buf);
-        } catch (Throwable t) {
-            return;
+        int n = lastN;
+        if (n < 0) {
+            try {
+                n = Bo1Activity.touchHudRead(lastBuf);
+                lastN = n;
+            } catch (Throwable t) {
+                return;
+            }
         }
         if (n < 12) {
             currentMode = 0;
             return;
         }
 
-        int mode = Math.round(buf[0]);
+        int mode = Math.round(lastBuf[0]);
         if (currentMode == 1 && mode != 1) {
             releaseMenuKeys();
         }
@@ -310,17 +366,17 @@ public final class TouchHudOverlay extends View {
             return;
         }
 
-        int visualStyle = Math.round(buf[1]);
-        float opacity = buf[2];
-        float stickFrac = buf[3];
-        boolean stickHeld = buf[4] > 0.5f;
-        float stickX = buf[5] * w;
-        float stickY = buf[6] * h;
-        float stickDX = buf[7];
-        float stickDY = buf[8];
-        float sprintThresh = buf[9];
-        boolean autoSprint = buf[10] > 0.5f;
-        int btnCount = Math.round(buf[11]);
+        int visualStyle = Math.round(lastBuf[1]);
+        float opacity = lastBuf[2];
+        float stickFrac = lastBuf[3];
+        boolean stickHeld = lastBuf[4] > 0.5f;
+        float stickX = lastBuf[5] * w;
+        float stickY = lastBuf[6] * h;
+        float stickDX = lastBuf[7];
+        float stickDY = lastBuf[8];
+        float sprintThresh = lastBuf[9];
+        boolean autoSprint = lastBuf[10] > 0.5f;
+        int btnCount = Math.round(lastBuf[11]);
 
         if (stickHeld) {
             float stickR = Math.max(0.06f, stickFrac) * h;
@@ -330,12 +386,12 @@ public final class TouchHudOverlay extends View {
 
         int pos = 12;
         for (int i = 0; i < btnCount && pos + 6 <= n; i++) {
-            float cx = buf[pos++] * w;
-            float cy = buf[pos++] * h;
-            float halfW = buf[pos++] * w;
-            float halfH = buf[pos++] * h;
-            boolean held = buf[pos++] > 0.5f;
-            int styleId = Math.round(buf[pos++]);
+            float cx = lastBuf[pos++] * w;
+            float cy = lastBuf[pos++] * h;
+            float halfW = lastBuf[pos++] * w;
+            float halfH = lastBuf[pos++] * h;
+            boolean held = lastBuf[pos++] > 0.5f;
+            int styleId = Math.round(lastBuf[pos++]);
             float r = Math.min(halfW, halfH);
             if (r < 10f) {
                 r = halfH;

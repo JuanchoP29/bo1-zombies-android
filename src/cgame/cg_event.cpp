@@ -2545,10 +2545,6 @@ void __cdecl CG_PhysLaunch(int localClientNum, centity_s *cent, const entityStat
                     cent->pose.ragdollHandle,
                     es->lerp.pos.trBase,
                     (hitLocation_t)es->eventParm);
-            // L30 measurement: the thundergun fling (LaunchRagdoll) reaching the client
-            Com_Printf(14, "bo1_physlaunch: ent %d ragdoll %d handle %d force %.0f %.0f %.0f loc %d\n", cent->nextState.number,
-                (int)cent->pose.isRagdoll, (int)cent->pose.ragdollHandle, es->lerp.pos.trBase[0], es->lerp.pos.trBase[1],
-                es->lerp.pos.trBase[2], (int)es->eventParm);
         }
     }
 }
