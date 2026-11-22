@@ -44,6 +44,7 @@ public class Bo1Activity extends SDLActivity {
 
     private SecondScreen secondScreen;
     private TouchHudOverlay touchOverlay;
+    private InGameMenuDialog quickMenu;
 
     @Override
     protected String[] getLibraries() {
@@ -111,9 +112,39 @@ public class Bo1Activity extends SDLActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        try {
+            if (getSharedPreferences("bo1_launcher_prefs", MODE_PRIVATE).getInt("bypassCharging", 0) != 0) {
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        BypassChargingHelper.enable();
+                    }
+                }).start();
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (BypassChargingHelper.isActive()) {
+            BypassChargingHelper.restore();
+        }
+        super.onPause();
+    }
+
+    @Override
     protected void onStop() {
+        if (BypassChargingHelper.isActive()) {
+            BypassChargingHelper.restore();
+        }
         if (padRumbleMode != 0 && lastRumbleAtMs > 0L) {
             setControllerRumble("0 0");
+        }
+        if (quickMenu != null) {
+            quickMenu.dismiss();
         }
         if (touchOverlay != null) {
             touchOverlay.stopOverlay();
@@ -122,6 +153,37 @@ public class Bo1Activity extends SDLActivity {
             secondScreen.stop();
         }
         super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (BypassChargingHelper.isActive()) {
+            BypassChargingHelper.restore();
+        }
+        super.onDestroy();
+    }
+
+    public void setPadRumbleMode(int mode) {
+        padRumbleMode = Math.max(0, Math.min(2, mode));
+    }
+
+    public void openQuickMenu(final boolean pauseIfIngame) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (pauseIfIngame) {
+                    try {
+                        ssKey(27, true);
+                        ssKey(27, false);
+                    } catch (Throwable ignored) {
+                    }
+                }
+                if (quickMenu == null) {
+                    quickMenu = new InGameMenuDialog(Bo1Activity.this);
+                }
+                quickMenu.show();
+            }
+        });
     }
 
     private boolean rumbleLogged;

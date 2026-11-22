@@ -1051,6 +1051,8 @@ void G_SP_HeadlessClientBegin(unsigned int clientNum)
 
 void G_SP_HeadlessTestClientFrame(bool afterFrame)
 {
+    if (afterFrame && G_SP_IsZombieMode() && sv.state == SS_GAME && !level.initializing && com_sv_running->current.enabled)
+        G_SP_ZmCheckpointFrame();
     {
         // L43: bo1_testclient_god in a real window (no harness there): the player(s) keep FL_GODMODE, the bit the
         // retail `god` cheat toggles (Cmd_God_f); G_Damage returns for it before the damage callback (SP 0x00540916).

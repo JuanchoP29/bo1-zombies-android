@@ -79,6 +79,7 @@ public class LauncherActivity extends Activity {
     private TextView gamePathView;
     private TextView gameStatusView;
     private LinearLayout driverListBox;
+    private LinearLayout savesListBox;
 
     // Settings state
     private int modeZombies = 1;       // 1 = Zombies, 0 = Multiplayer
@@ -90,6 +91,7 @@ public class LauncherActivity extends Activity {
     private int shaderWarming = 1;     // 1=On, 0=Off
     private int vkAsync = 1;           // 0=Wait, 1=Effects bg, 2=All bg
     private int fpsCounter = 3;        // 0=None, 1=Simple, 2=Advanced, 3=Full
+    private int bypassCharging = 0;    // 0=Off (default), 1=Experimental Root Bypass Charging
 
     private int touchEnabled = 1;
     private int touchStyle = 0;        // 0=Shooter, 1=Xbox, 2=PlayStation
@@ -119,6 +121,7 @@ public class LauncherActivity extends Activity {
         loadSettings();
         if (currentTab == 0) {
             refreshGameStatus();
+            refreshSavesList();
         } else if (currentTab == 1) {
             refreshDriverList();
         } else if (currentTab == 3) {
@@ -136,6 +139,7 @@ public class LauncherActivity extends Activity {
         shaderWarming = prefs.getInt("shaderWarming", 1);
         vkAsync = prefs.getInt("vkAsync", 1);
         fpsCounter = prefs.getInt("fpsCounter", 3);
+        bypassCharging = prefs.getInt("bypassCharging", 0);
 
         touchEnabled = prefs.getInt("touchEnabled", 1);
         touchStyle = prefs.getInt("touchStyle", 0);
@@ -157,6 +161,7 @@ public class LauncherActivity extends Activity {
                 .putInt("shaderWarming", shaderWarming)
                 .putInt("vkAsync", vkAsync)
                 .putInt("fpsCounter", fpsCounter)
+                .putInt("bypassCharging", bypassCharging)
                 .putInt("touchEnabled", touchEnabled)
                 .putInt("touchStyle", touchStyle)
                 .putInt("touchPreset", touchPreset)
@@ -467,7 +472,109 @@ public class LauncherActivity extends Activity {
             }
         }));
 
+        LinearLayout savesCard = makeCard("PARTIDAS GUARDADAS (CHECKPOINTS ZOMBIES)");
+        savesListBox = new LinearLayout(this);
+        savesListBox.setOrientation(LinearLayout.VERTICAL);
+        savesCard.addView(savesListBox);
+
         refreshGameStatus();
+        refreshSavesList();
+    }
+
+    private void refreshSavesList() {
+        if (savesListBox == null) {
+            return;
+        }
+        savesListBox.removeAllViews();
+        List<ZmSaveHelper.SlotInfo> saves = ZmSaveHelper.listSaves(filesDir);
+        if (saves.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("Aún no tienes checkpoints guardados. Dentro de una partida de Zombies toca \"⚙ MENÚ\" arriba para guardar tu ronda.");
+            empty.setTextColor(COL_MUTED);
+            empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            savesListBox.addView(empty);
+            return;
+        }
+        for (final ZmSaveHelper.SlotInfo s : saves) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackground(boxBg(0xFF10141A, COL_BORDER, 8));
+            row.setPadding(dp(10), dp(8), dp(8), dp(8));
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rlp.bottomMargin = dp(6);
+            row.setLayoutParams(rlp);
+
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView t = new TextView(this);
+            t.setText(s.friendlyMap() + " — Ronda " + s.round);
+            t.setTextColor(COL_TEXT);
+            t.setTypeface(Typeface.DEFAULT_BOLD);
+            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            col.addView(t);
+
+            TextView sub = new TextView(this);
+            sub.setText(s.summaryLine());
+            sub.setTextColor(COL_MUTED);
+            sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            col.addView(sub);
+            row.addView(col);
+
+            Button loadBtn = new Button(this);
+            loadBtn.setText("▶ Cargar");
+            loadBtn.setAllCaps(false);
+            loadBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            loadBtn.setTypeface(Typeface.DEFAULT_BOLD);
+            loadBtn.setTextColor(0xFF0B0D10);
+            loadBtn.setBackground(boxBg(COL_AMBER, 0, 6));
+            loadBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
+            loadBtn.setMinHeight(0);
+            loadBtn.setMinimumHeight(dp(32));
+            loadBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    launchGame(s.slotId, s.map);
+                }
+            });
+            row.addView(loadBtn);
+
+            Button delBtn = new Button(this);
+            delBtn.setText("✕");
+            delBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            delBtn.setTypeface(Typeface.DEFAULT_BOLD);
+            delBtn.setTextColor(COL_ERR);
+            delBtn.setBackground(boxBg(0xFF1F2631, COL_BORDER, 6));
+            delBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
+            delBtn.setMinHeight(0);
+            delBtn.setMinimumHeight(dp(32));
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            dlp.leftMargin = dp(6);
+            delBtn.setLayoutParams(dlp);
+            delBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    new AlertDialog.Builder(LauncherActivity.this)
+                            .setTitle("Eliminar guardado")
+                            .setMessage("¿Eliminar " + s.friendlyMap() + " (Ronda " + s.round + ")?")
+                            .setPositiveButton("Eliminar", new android.content.DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(android.content.DialogInterface d, int w) {
+                                    ZmSaveHelper.deleteSlot(filesDir, s.slotId);
+                                    refreshSavesList();
+                                }
+                            })
+                            .setNegativeButton("Cancelar", null)
+                            .show();
+                }
+            });
+            row.addView(delBtn);
+            savesListBox.addView(row);
+        }
     }
 
     private File getActiveGameDir() {
@@ -804,6 +911,15 @@ public class LauncherActivity extends Activity {
                         fpsCounter = v;
                     }
                 });
+
+        addSpinnerRow(card, "Carga Directa / Bypass (Root)", new String[] {
+                "Desactivada (Default)", "Activada (Experimental)"
+        }, bypassCharging, new IntConsumer() {
+            @Override
+            public void accept(int v) {
+                bypassCharging = v;
+            }
+        });
     }
 
     // ---- TAB 4: CONTROLS ----
@@ -896,6 +1012,10 @@ public class LauncherActivity extends Activity {
     }
 
     private void launchGame() {
+        launchGame(null, null);
+    }
+
+    private void launchGame(String autoloadSlot, String autoloadMap) {
         File gameDir = getActiveGameDir();
         if (!isGameDirValid(gameDir)) {
             selectTab(0);
@@ -941,6 +1061,12 @@ public class LauncherActivity extends Activity {
         String mode = getSelectedResolution();
         if (mode != null) {
             args.append(" +set r_mode ").append(mode);
+        }
+        if (autoloadSlot != null && !autoloadSlot.isEmpty() && autoloadMap != null && !autoloadMap.isEmpty()) {
+            args.append(" +set systemlink 0 +set bo1_expected_players 0 +set bo1_zm_autoload ")
+                    .append(autoloadSlot)
+                    .append(" +map ")
+                    .append(autoloadMap);
         }
 
         writeSmallFile(new File(filesDir, "args.txt"), args.toString());

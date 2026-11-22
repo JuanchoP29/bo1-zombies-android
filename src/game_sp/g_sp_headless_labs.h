@@ -10,3 +10,4 @@ gentity_s *G_SP_HeadlessLabsGoal(gentity_s *player);
 gentity_s *G_SP_HeadlessLabsThief(gentity_s *player);
 void G_SP_HeadlessRoundFields(scriptInstance_t inst);
 void G_SP_HeadlessRoundNotify(scriptInstance_t inst, unsigned int owner, unsigned int name);
+void G_SP_ZmCheckpointFrame();

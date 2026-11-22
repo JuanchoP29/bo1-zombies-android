@@ -36,10 +36,23 @@
 #include <bgame/bg_local.h>
 #include <bgame/bg_weapons.h>
 #include <bgame/bg_weapons_def.h>
+#include <bgame/bg_weapons_ammo.h>
+#include <bgame/bg_perks.h>
 #include <bgame/bg_misc.h>
 #include <bgame/bg_mantle.h>
+#include <game/g_weapon.h>
+#include <game_mp/g_client_script_cmd_mp.h>
+#include <qcommon/cmd.h>
 #include "g_sp_player_state.h"
 #include <cstring>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#ifndef _WIN32
+#include <sys/stat.h>
+#else
+#include <direct.h>
+#endif
 
 static const dvar_s *g_headlessLabs;
 static bool g_labsMoved;
@@ -241,13 +254,358 @@ static unsigned int g_roundNumberKey;
 static const dvar_s *g_headlessDogs;
 static unsigned int g_nextDogRoundKey;
 
+static const dvar_s *g_zmAutoloadDvar;
+static cmd_function_s s_zmSaveCmd, s_zmLoadCmd;
+static bool s_zmCmdsRegistered;
+
+struct ZmSavedWeapon
+{
+    char name[64];
+    int clip;
+    int stock;
+};
+
+struct ZmCheckpoint
+{
+    bool pending;
+    int spawnTime;
+    char map[64];
+    int round;
+    int score;
+    int health;
+    int maxHealth;
+    char activeWeapon[64];
+    int weaponCount;
+    ZmSavedWeapon weapons[12];
+    int perkCount;
+    char perks[10][48];
+};
+
+static ZmCheckpoint s_zmCp;
+
+static const char *kZmPerkList[] = {
+    "specialty_armorvest",
+    "specialty_fastreload",
+    "specialty_quickrevive",
+    "specialty_rof",
+    "specialty_longersprint",
+    "specialty_flakjacket",
+    "specialty_deadshot",
+    "specialty_additionalprimaryweapon",
+};
+
+static void ZmSanitizeSlot(const char *in, char *out, size_t outSize)
+{
+    size_t j = 0;
+    if (in)
+    {
+        for (size_t i = 0; in[i] && j + 1 < outSize; ++i)
+        {
+            const char c = in[i];
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-')
+                out[j++] = c;
+        }
+    }
+    if (j == 0 && outSize > 6)
+    {
+        strcpy(out, "slot1");
+        return;
+    }
+    out[j] = '\0';
+}
+
+static bool ZmBuildSavePath(const char *slot, char *outPath, size_t outSize, bool createDir)
+{
+    const char *home = Dvar_GetString("fs_homepath");
+    if (!home || !home[0])
+        return false;
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/zm_saves", home);
+    if (createDir)
+    {
+#ifndef _WIN32
+        mkdir(dir, 0775);
+#else
+        _mkdir(dir);
+#endif
+    }
+    char safe[48];
+    ZmSanitizeSlot(slot, safe, sizeof(safe));
+    snprintf(outPath, outSize, "%s/%s.txt", dir, safe);
+    return true;
+}
+
+static bool ZmParseCheckpointFile(const char *path, ZmCheckpoint *cp)
+{
+    memset(cp, 0, sizeof(*cp));
+    cp->round = 1;
+    cp->score = 500;
+    cp->health = 100;
+    cp->maxHealth = 100;
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return false;
+    char line[256];
+    while (fgets(line, sizeof(line), f))
+    {
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+        if (!strncmp(line, "map=", 4))
+            snprintf(cp->map, sizeof(cp->map), "%s", line + 4);
+        else if (!strncmp(line, "round=", 6))
+            cp->round = atoi(line + 6);
+        else if (!strncmp(line, "score=", 6))
+            cp->score = atoi(line + 6);
+        else if (!strncmp(line, "health=", 7))
+            cp->health = atoi(line + 7);
+        else if (!strncmp(line, "maxhealth=", 10))
+            cp->maxHealth = atoi(line + 10);
+        else if (!strncmp(line, "active=", 7))
+            snprintf(cp->activeWeapon, sizeof(cp->activeWeapon), "%s", line + 7);
+        else if (!strncmp(line, "weapon=", 7) && cp->weaponCount < 12)
+        {
+            ZmSavedWeapon &w = cp->weapons[cp->weaponCount];
+            if (sscanf(line + 7, "%63s %d %d", w.name, &w.clip, &w.stock) == 3)
+                ++cp->weaponCount;
+        }
+        else if (!strncmp(line, "perk=", 5) && cp->perkCount < 10)
+        {
+            snprintf(cp->perks[cp->perkCount], sizeof(cp->perks[0]), "%s", line + 5);
+            ++cp->perkCount;
+        }
+    }
+    fclose(f);
+    if (cp->round < 1) cp->round = 1;
+    if (cp->round > 255) cp->round = 255;
+    if (cp->score < 0) cp->score = 0;
+    if (cp->maxHealth < 100) cp->maxHealth = 100;
+    return cp->map[0] != '\0';
+}
+
+static void G_SP_ZmSave_f()
+{
+    if (!G_SP_IsZombieMode() || !g_entities[0].r.inuse || !g_entities[0].client)
+    {
+        Com_Printf(16, "zm_save: not in an active Zombies match\n");
+        return;
+    }
+    const char *slot = Cmd_Argc() >= 2 ? Cmd_Argv(1) : "slot1";
+    char path[560];
+    if (!ZmBuildSavePath(slot, path, sizeof(path), true))
+        return;
+
+    gentity_s *player = &g_entities[0];
+    gclient_s *client = player->client;
+    playerState_s *ps = &client->ps;
+    const char *mapName = Dvar_GetString("mapname");
+
+    int round = 1;
+    if (g_roundNumberKey && gScrVarPub[SCRIPTINSTANCE_SERVER].levelId)
+    {
+        unsigned int id = FindVariable(SCRIPTINSTANCE_SERVER, gScrVarPub[SCRIPTINSTANCE_SERVER].levelId, g_roundNumberKey);
+        if (id && GetValueType(SCRIPTINSTANCE_SERVER, id) == VAR_INTEGER)
+        {
+            round = GetVariableValueAddress(SCRIPTINSTANCE_SERVER, id)->u.intValue;
+            if (round < 1) round = 1;
+        }
+    }
+
+    FILE *f = fopen(path, "w");
+    if (!f)
+    {
+        Com_Printf(16, "zm_save: failed to open %s\n", path);
+        return;
+    }
+
+    const int score = client->sess.cs.score.score;
+    const int maxHp = ps->maxHealth > 100 ? ps->maxHealth : (player->maxHealth > 100 ? player->maxHealth : 100);
+    const int hp = player->health > 0 ? player->health : maxHp;
+    const char *activeName = "";
+    if (ps->weapon)
+    {
+        const WeaponVariantDef *vdef = BG_GetWeaponVariantDef(ps->weapon);
+        if (vdef && vdef->szInternalName)
+            activeName = vdef->szInternalName;
+    }
+
+    fprintf(f, "map=%s\n", mapName ? mapName : "");
+    fprintf(f, "round=%d\n", round);
+    fprintf(f, "score=%d\n", score);
+    fprintf(f, "health=%d\n", hp);
+    fprintf(f, "maxhealth=%d\n", maxHp);
+    fprintf(f, "time=%lld\n", (long long)time(nullptr));
+    fprintf(f, "active=%s\n", activeName);
+
+    int savedWeapons = 0;
+    for (int i = 0; i < 15; ++i)
+    {
+        const unsigned int w = ps->heldWeapons[i].weapon;
+        if (!w)
+            continue;
+        const WeaponVariantDef *vdef = BG_GetWeaponVariantDef(w);
+        if (!vdef || !vdef->szInternalName || !vdef->szInternalName[0])
+            continue;
+        const char *wn = vdef->szInternalName;
+        if (strstr(wn, "bottle") || strstr(wn, "syrette") || strstr(wn, "knuckle_crack"))
+            continue;
+        const int clip = BG_GetAmmoInClip(ps, w);
+        const int stock = BG_GetAmmoNotInClip(ps, w);
+        fprintf(f, "weapon=%s %d %d\n", wn, clip, stock);
+        ++savedWeapons;
+    }
+
+    int savedPerks = 0;
+    for (size_t i = 0; i < sizeof(kZmPerkList) / sizeof(kZmPerkList[0]); ++i)
+    {
+        if (G_SP_HasPerk(client, kZmPerkList[i]))
+        {
+            fprintf(f, "perk=%s\n", kZmPerkList[i]);
+            ++savedPerks;
+        }
+    }
+    fclose(f);
+    Com_Printf(16, "zm_save: saved '%s' (%s R%d pts=%d weapons=%d perks=%d)\n",
+        slot, mapName ? mapName : "", round, score, savedWeapons, savedPerks);
+}
+
+static void G_SP_ZmLoad_f()
+{
+    if (Cmd_Argc() < 2)
+        return;
+    char safe[48];
+    ZmSanitizeSlot(Cmd_Argv(1), safe, sizeof(safe));
+    char path[560];
+    if (!ZmBuildSavePath(safe, path, sizeof(path), false))
+        return;
+    ZmCheckpoint tmp;
+    if (!ZmParseCheckpointFile(path, &tmp))
+    {
+        Com_Printf(16, "zm_load: checkpoint '%s' not found or invalid\n", safe);
+        return;
+    }
+    Com_Printf(16, "zm_load: launching %s (R%d, score=%d)\n", tmp.map, tmp.round, tmp.score);
+    Cbuf_AddText(0, va("set systemlink 0\nset bo1_expected_players 0\nset bo1_zm_autoload \"%s\"\nmap %s\n",
+        safe, tmp.map));
+}
+
+void G_SP_ZmCheckpointFrame()
+{
+    if (!s_zmCp.pending || !G_SP_IsZombieMode())
+        return;
+    if (!g_entities[0].r.inuse || !g_entities[0].client || g_entities[0].health <= 0)
+        return;
+    if (level.time < s_zmCp.spawnTime + 1200)
+        return;
+
+    s_zmCp.pending = false;
+    gentity_s *player = &g_entities[0];
+    gclient_s *client = player->client;
+    playerState_s *ps = &client->ps;
+
+    // 1. Restore Perks + Health
+    bool hasJugg = false;
+    for (int i = 0; i < s_zmCp.perkCount; ++i)
+    {
+        const unsigned int perk = BG_GetPerkIndexForName(s_zmCp.perks[i]);
+        if (perk)
+        {
+            BG_SetPerk(ps->perks, perk);
+            BG_SetPerk(client->sess.cs.perks, perk);
+        }
+        if (!strcmp(s_zmCp.perks[i], "specialty_armorvest"))
+            hasJugg = true;
+    }
+    if (hasJugg || s_zmCp.maxHealth > 100)
+    {
+        const int targetMax = s_zmCp.maxHealth > 100 ? s_zmCp.maxHealth : 250;
+        ps->maxHealth = targetMax;
+        player->maxHealth = targetMax;
+        player->health = targetMax;
+    }
+
+    // 2. Restore Weapons + Exact Clip & Reserve Ammo
+    if (s_zmCp.weaponCount > 0)
+    {
+        // Clear default starting primary weapons so we don't exceed slot cap
+        for (int i = 0; i < 15; ++i)
+        {
+            const unsigned int held = ps->heldWeapons[i].weapon;
+            if (!held)
+                continue;
+            const WeaponDef *def = BG_GetWeaponDef(held);
+            if (def && def->inventoryType == WEAPINVENTORY_PRIMARY)
+                BG_TakePlayerWeapon(ps, held);
+        }
+        unsigned int selectIdx = 0;
+        for (int i = 0; i < s_zmCp.weaponCount; ++i)
+        {
+            const ZmSavedWeapon &sw = s_zmCp.weapons[i];
+            const unsigned int w = BG_GetWeaponIndexForName(sw.name);
+            if (!w)
+                continue;
+            if (G_GivePlayerWeapon(ps, w, 0, 0))
+            {
+                G_InitializeAmmo(player, w, 0, 0);
+                const int clipIdx = BG_ClipForWeapon(w);
+                if (clipIdx)
+                {
+                    int c = sw.clip;
+                    const int maxClip = BG_GetClipSize(w);
+                    if (c < 0) c = 0;
+                    if (c > maxClip) c = maxClip;
+                    BG_SetAmmoInClip(ps, clipIdx, c);
+                }
+                if (!BG_WeaponIsClipOnly(w) && BG_AmmoForWeapon(w))
+                {
+                    int st = sw.stock;
+                    const int maxStock = BG_GetAmmoPlayerMax(ps, w, 0);
+                    if (st < 0) st = 0;
+                    if (st > maxStock) st = maxStock;
+                    BG_SetAmmoInPool(ps, w, st);
+                }
+                if (!strcmp(sw.name, s_zmCp.activeWeapon))
+                    selectIdx = w;
+                else if (!selectIdx)
+                {
+                    const WeaponDef *def = BG_GetWeaponDef(w);
+                    if (def && def->inventoryType == WEAPINVENTORY_PRIMARY)
+                        selectIdx = w;
+                }
+            }
+        }
+        if (selectIdx)
+            G_SelectWeaponIndex(0, (int)selectIdx);
+    }
+
+    // 3. Restore Score
+    client->sess.cs.score.score = s_zmCp.score;
+    CalculateRanks();
+
+    Com_Printf(16, "zm_load: restored %s R%d pts=%d weapons=%d perks=%d\n",
+        s_zmCp.map, s_zmCp.round, s_zmCp.score, s_zmCp.weaponCount, s_zmCp.perkCount);
+}
+
 void G_SP_HeadlessRoundFields(scriptInstance_t inst)
 {
-    if (inst != SCRIPTINSTANCE_SERVER || !Sys_IsHeadless())
+    if (inst != SCRIPTINSTANCE_SERVER)
         return;
-    // k1 harness: loading client scripts must not erase the server canonical key.
+    // Always capture canonical round_number key for Zombies Checkpoints (and headless tests).
     g_roundNumberKey = 0;
     g_nextDogRoundKey = 0;
+    if (!g_zmAutoloadDvar)
+        g_zmAutoloadDvar = _Dvar_RegisterString("bo1_zm_autoload", "", 0, "mod (zombies): checkpoint slot to restore on map load");
+    if (!s_zmCmdsRegistered)
+    {
+        s_zmCmdsRegistered = true;
+        Cmd_AddCommandInternal("zm_save", G_SP_ZmSave_f, &s_zmSaveCmd);
+        Cmd_AddCommandInternal("zm_load", G_SP_ZmLoad_f, &s_zmLoadCmd);
+    }
+    unsigned int string = SL_FindString("round_number", inst);
+    g_roundNumberKey = string ? gScrCompilePub[inst].canonicalStrings[string] : 0;
+
+    if (!Sys_IsHeadless())
+        return;
     if (!g_headlessDogs)
         g_headlessDogs = _Dvar_RegisterBool("bo1_testclient_dogs", false, 0,
             "TEST SWITCH (headless test client only): force_dogs - level.next_dog_round = level.round_number at "
@@ -256,9 +614,6 @@ void G_SP_HeadlessRoundFields(scriptInstance_t inst)
         g_headlessRound = _Dvar_RegisterInt("bo1_testclient_round", 0, 0, 100, 0,
             "TEST SWITCH (headless test client only): set level.round_number to N when round_start sets "
             "flag begin_spawning (use with mutator_quickStart 1); 0 = off");
-    // Compiler identifiers are canonical IDs; save the mapping before Scr_EndLoadScripts releases them.
-    unsigned int string = SL_FindString("round_number", inst);
-    g_roundNumberKey = string ? gScrCompilePub[inst].canonicalStrings[string] : 0;
     string = SL_FindString("next_dog_round", inst);
     g_nextDogRoundKey = string ? gScrCompilePub[inst].canonicalStrings[string] : 0;
 }
@@ -280,12 +635,32 @@ static void G_SP_HeadlessDogsNotify(scriptInstance_t inst, unsigned int owner, u
 
 void G_SP_HeadlessRoundNotify(scriptInstance_t inst, unsigned int owner, unsigned int name)
 {
-    if (inst == SCRIPTINSTANCE_SERVER && owner == gScrVarPub[inst].levelId && Sys_IsHeadless() && G_SP_IsZombieMode()
-        && Dvar_GetBool("bo1_testclient"))
+    if (inst != SCRIPTINSTANCE_SERVER || owner != gScrVarPub[inst].levelId || !G_SP_IsZombieMode())
+        return;
+    // Zombies Checkpoint round restore on "begin_spawning"
+    if (g_roundNumberKey && g_zmAutoloadDvar && g_zmAutoloadDvar->current.string[0]
+        && name && !strcmp(SL_ConvertToString(name, inst), "begin_spawning"))
+    {
+        char path[560];
+        if (ZmBuildSavePath(g_zmAutoloadDvar->current.string, path, sizeof(path), false)
+            && ZmParseCheckpointFile(path, &s_zmCp))
+        {
+            s_zmCp.pending = true;
+            s_zmCp.spawnTime = level.time;
+            unsigned int id = FindVariable(inst, owner, g_roundNumberKey);
+            if (id && GetValueType(inst, id) == VAR_INTEGER)
+            {
+                VariableUnion &value = GetVariableValueAddress(inst, id)->u;
+                Com_Printf(16, "zm_load: setting level.round_number %d -> %d\n", value.intValue, s_zmCp.round);
+                value.intValue = s_zmCp.round;
+            }
+        }
+        Dvar_SetString((dvar_s *)g_zmAutoloadDvar, "");
+    }
+    if (Sys_IsHeadless() && Dvar_GetBool("bo1_testclient"))
         G_SP_HeadlessDogsNotify(inst, owner, name);
-    if (inst != SCRIPTINSTANCE_SERVER || owner != gScrVarPub[inst].levelId || !g_roundNumberKey
-        || !g_headlessRound || g_headlessRound->current.integer <= 0 || !Sys_IsHeadless()
-        || !G_SP_IsZombieMode() || !Dvar_GetBool("bo1_testclient"))
+    if (!g_roundNumberKey || !g_headlessRound || g_headlessRound->current.integer <= 0 || !Sys_IsHeadless()
+        || !Dvar_GetBool("bo1_testclient"))
         return;
     if (!name || strcmp(SL_ConvertToString(name, inst), "begin_spawning"))
         return;
