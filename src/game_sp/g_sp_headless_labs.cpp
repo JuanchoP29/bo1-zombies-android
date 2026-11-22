@@ -28,6 +28,8 @@
 #include <server/sv_world.h>
 #include <qcommon/cm_trace.h>
 #include <clientscript/scr_const.h>
+#include <clientscript/cscr_main.h>
+#include <clientscript/cscr_vm.h>
 #include <clientscript/cscr_stringlist.h>
 #include <clientscript/cscr_compiler.h>
 #include <game/actor_navigation.h>
@@ -257,6 +259,7 @@ static unsigned int g_nextDogRoundKey;
 
 static const dvar_s *g_zmAutoloadDvar;
 static unsigned int g_firstRoundKey;
+static int g_zmGivePerkHandle;
 static cmd_function_s s_zmSaveCmd, s_zmLoadCmd;
 static bool s_zmCmdsRegistered;
 
@@ -281,6 +284,11 @@ struct ZmCheckpoint
     char map[64];
     int round;
     int score;
+    int kills;
+    int deaths;
+    int assists;
+    bool hasCols;
+    int sbCols[5];
     int health;
     int maxHealth;
     bool hasPos;
@@ -415,6 +423,18 @@ static bool ZmParseCheckpointFile(const char *path, ZmCheckpoint *cp)
             cp->round = atoi(line + 6);
         else if (!strncmp(line, "score=", 6))
             cp->score = atoi(line + 6);
+        else if (!strncmp(line, "kills=", 6))
+            cp->kills = atoi(line + 6);
+        else if (!strncmp(line, "deaths=", 7))
+            cp->deaths = atoi(line + 7);
+        else if (!strncmp(line, "assists=", 8))
+            cp->assists = atoi(line + 8);
+        else if (!strncmp(line, "sbcols=", 7))
+        {
+            if (sscanf(line + 7, "%d %d %d %d %d",
+                    &cp->sbCols[0], &cp->sbCols[1], &cp->sbCols[2], &cp->sbCols[3], &cp->sbCols[4]) == 5)
+                cp->hasCols = true;
+        }
         else if (!strncmp(line, "health=", 7))
             cp->health = atoi(line + 7);
         else if (!strncmp(line, "maxhealth=", 10))
@@ -499,6 +519,15 @@ static void G_SP_ZmSave_f()
     fprintf(f, "map=%s\n", mapName ? mapName : "");
     fprintf(f, "round=%d\n", round);
     fprintf(f, "score=%d\n", score);
+    fprintf(f, "kills=%d\n", client->sess.cs.score.kills);
+    fprintf(f, "deaths=%d\n", client->sess.cs.score.deaths);
+    fprintf(f, "assists=%d\n", client->sess.cs.score.assists);
+    fprintf(f, "sbcols=%d %d %d %d %d\n",
+        client->sess.cs.score.scoreboardColumns[0],
+        client->sess.cs.score.scoreboardColumns[1],
+        client->sess.cs.score.scoreboardColumns[2],
+        client->sess.cs.score.scoreboardColumns[3],
+        client->sess.cs.score.scoreboardColumns[4]);
     fprintf(f, "health=%d\n", hp);
     fprintf(f, "maxhealth=%d\n", maxHp);
     fprintf(f, "pos=%.1f %.1f %.1f %.1f\n",
@@ -636,12 +665,18 @@ void G_SP_ZmCheckpointFrame()
         return;
     s_zmCp.phase = 0;
 
-    // 1. Restore Perks + Health (G_SP_SetPerk handles all Zombies perks without MP's 52-perk assert)
+    // 1. Restore Perks + Health via official maps/_zombiemode_perks::give_perk (HUD icons + Quick Revive solo lives + Juggernog)
     bool hasJugg = false;
     for (int i = 0; i < s_zmCp.perkCount; ++i)
     {
-        if (s_zmCp.perks[i][0])
-            G_SP_SetPerk(client, s_zmCp.perks[i], true);
+        if (!s_zmCp.perks[i][0])
+            continue;
+        if (g_zmGivePerkHandle)
+        {
+            Scr_AddString(s_zmCp.perks[i], SCRIPTINSTANCE_SERVER);
+            Scr_FreeThread(Scr_ExecEntThread(player, g_zmGivePerkHandle, 1u), SCRIPTINSTANCE_SERVER);
+        }
+        G_SP_SetPerk(client, s_zmCp.perks[i], true);
         if (!strcmp(s_zmCp.perks[i], "specialty_armorvest"))
             hasJugg = true;
     }
@@ -708,8 +743,19 @@ void G_SP_ZmCheckpointFrame()
             G_SelectWeaponIndex(0, (int)selectIdx);
     }
 
-    // 3. Restore Exact Score (after Phase 1 door scripts finished)
+    // 3. Restore Exact Score & Scoreboard Stats (Kills, Downs, Revives, Headshots)
     client->sess.cs.score.score = s_zmCp.score;
+    if (s_zmCp.kills > 0)
+        client->sess.cs.score.kills = s_zmCp.kills;
+    if (s_zmCp.deaths > 0)
+        client->sess.cs.score.deaths = s_zmCp.deaths;
+    if (s_zmCp.assists > 0)
+        client->sess.cs.score.assists = s_zmCp.assists;
+    if (s_zmCp.hasCols)
+    {
+        for (int i = 0; i < 5; ++i)
+            client->sess.cs.score.scoreboardColumns[i] = s_zmCp.sbCols[i];
+    }
     CalculateRanks();
 
     // 4. Restore Saved Position (if present)
@@ -719,9 +765,9 @@ void G_SP_ZmCheckpointFrame()
         TeleportPlayer(player, s_zmCp.pos, angles);
     }
 
-    Com_Printf(16, "zm_load: restored %s R%d pts=%d weapons=%d perks=%d doors=%d power=%d\n",
-        s_zmCp.map, s_zmCp.round, s_zmCp.score, s_zmCp.weaponCount, s_zmCp.perkCount,
-        s_zmCp.doorCount, s_zmCp.power ? 1 : 0);
+    Com_Printf(16, "zm_load: restored %s R%d pts=%d kills=%d weapons=%d perks=%d (give_perk=%d) doors=%d power=%d\n",
+        s_zmCp.map, s_zmCp.round, s_zmCp.score, s_zmCp.kills, s_zmCp.weaponCount, s_zmCp.perkCount,
+        g_zmGivePerkHandle, s_zmCp.doorCount, s_zmCp.power ? 1 : 0);
 }
 
 void G_SP_HeadlessRoundFields(scriptInstance_t inst)
@@ -732,6 +778,7 @@ void G_SP_HeadlessRoundFields(scriptInstance_t inst)
     g_roundNumberKey = 0;
     g_firstRoundKey = 0;
     g_nextDogRoundKey = 0;
+    g_zmGivePerkHandle = Scr_GetFunctionHandle(inst, "maps/_zombiemode_perks", "give_perk");
     s_mapTriggersCaptured = false;
     s_mapTriggerCount = 0;
     s_powerOn = false;
