@@ -255,6 +255,7 @@ static const dvar_s *g_headlessDogs;
 static unsigned int g_nextDogRoundKey;
 
 static const dvar_s *g_zmAutoloadDvar;
+static unsigned int g_firstRoundKey;
 static cmd_function_s s_zmSaveCmd, s_zmLoadCmd;
 static bool s_zmCmdsRegistered;
 
@@ -316,9 +317,14 @@ static void ZmSanitizeSlot(const char *in, char *out, size_t outSize)
 
 static bool ZmBuildSavePath(const char *slot, char *outPath, size_t outSize, bool createDir)
 {
-    const char *home = Dvar_GetString("fs_homepath");
+    const char *home = Dvar_GetString("fs_h");
     if (!home || !home[0])
+        home = Dvar_GetString("fs_homepath");
+    if (!home || !home[0])
+    {
+        Com_Printf(16, "zm_save/load: fs_h is empty\n");
         return false;
+    }
     char dir[512];
     snprintf(dir, sizeof(dir), "%s/zm_saves", home);
     if (createDir)
@@ -592,8 +598,9 @@ void G_SP_HeadlessRoundFields(scriptInstance_t inst)
 {
     if (inst != SCRIPTINSTANCE_SERVER)
         return;
-    // Always capture canonical round_number key for Zombies Checkpoints (and headless tests).
+    // Always capture canonical round_number / first_round keys for Zombies Checkpoints (and headless tests).
     g_roundNumberKey = 0;
+    g_firstRoundKey = 0;
     g_nextDogRoundKey = 0;
     if (!g_zmAutoloadDvar)
         g_zmAutoloadDvar = _Dvar_RegisterString("bo1_zm_autoload", "", 0, "mod (zombies): checkpoint slot to restore on map load");
@@ -605,6 +612,8 @@ void G_SP_HeadlessRoundFields(scriptInstance_t inst)
     }
     unsigned int string = SL_FindString("round_number", inst);
     g_roundNumberKey = string ? gScrCompilePub[inst].canonicalStrings[string] : 0;
+    string = SL_FindString("first_round", inst);
+    g_firstRoundKey = string ? gScrCompilePub[inst].canonicalStrings[string] : 0;
 
     if (!Sys_IsHeadless())
         return;
@@ -655,6 +664,12 @@ void G_SP_HeadlessRoundNotify(scriptInstance_t inst, unsigned int owner, unsigne
                 VariableUnion &value = GetVariableValueAddress(inst, id)->u;
                 Com_Printf(16, "zm_load: setting level.round_number %d -> %d\n", value.intValue, s_zmCp.round);
                 value.intValue = s_zmCp.round;
+            }
+            if (s_zmCp.round > 1 && g_firstRoundKey)
+            {
+                unsigned int fid = FindVariable(inst, owner, g_firstRoundKey);
+                if (fid && GetValueType(inst, fid) == VAR_INTEGER)
+                    GetVariableValueAddress(inst, fid)->u.intValue = 0;
             }
         }
         Dvar_SetString((dvar_s *)g_zmAutoloadDvar, "");
