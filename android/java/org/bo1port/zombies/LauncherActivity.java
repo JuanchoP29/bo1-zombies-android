@@ -860,13 +860,14 @@ public class LauncherActivity extends Activity {
         });
 
         LinearLayout padCard = makeCard("MANDO (BLUETOOTH / USB)");
-        addSpinnerRow(padCard, "Vibración del mando", new String[] { "Activada (segura BT)", "Desactivada" },
-                padRumble == 1 ? 0 : 1, new IntConsumer() {
-                    @Override
-                    public void accept(int v) {
-                        padRumble = (v == 0) ? 1 : 0;
-                    }
-                });
+        addSpinnerRow(padCard, "Vibración del mando", new String[] {
+                "Desactivada (0% cortes BT)", "Segura BT (1 motor suave)", "Completa (USB / Cable)"
+        }, padRumble, new IntConsumer() {
+            @Override
+            public void accept(int v) {
+                padRumble = v;
+            }
+        });
         addSliderRow(padCard, "Zona muerta de sticks", 5, 25, padDeadzonePct, "", 0.01f, new IntConsumer() {
             @Override
             public void accept(int v) {
@@ -935,6 +936,7 @@ public class LauncherActivity extends Activity {
         args.append(String.format(Locale.US, " +set bo1_touch_sensitivity %.2f", touchSensPct * 0.1f));
         args.append(String.format(Locale.US, " +set bo1_touch_opacity %.2f", touchOpacityPct * 0.01f));
         args.append(String.format(Locale.US, " +set gpad_stick_deadzone_min %.2f", padDeadzonePct * 0.01f));
+        args.append(" +set gpad_rumble ").append(padRumble == 0 ? 0 : 1);
 
         String mode = getSelectedResolution();
         if (mode != null) {

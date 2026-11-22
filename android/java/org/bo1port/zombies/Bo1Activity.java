@@ -83,6 +83,11 @@ public class Bo1Activity extends SDLActivity {
             secondScreen = null;   // no second-screen controller; the game is not affected
         }
         try {
+            padRumbleMode = getSharedPreferences("bo1_launcher_prefs", MODE_PRIVATE).getInt("padRumble", 1);
+        } catch (Throwable ignored) {
+            padRumbleMode = 1;
+        }
+        try {
             if (mLayout != null) {
                 touchOverlay = new TouchHudOverlay(this);
                 RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(
@@ -107,7 +112,9 @@ public class Bo1Activity extends SDLActivity {
 
     @Override
     protected void onStop() {
-        setControllerRumble("0 0");
+        if (padRumbleMode != 0 && lastRumbleAtMs > 0L) {
+            setControllerRumble("0 0");
+        }
         if (touchOverlay != null) {
             touchOverlay.stopOverlay();
         }
@@ -118,46 +125,38 @@ public class Bo1Activity extends SDLActivity {
     }
 
     private boolean rumbleLogged;
-    private boolean rumbleEnabled = true;
-    private int lastRumbleLow = -1;
-    private int lastRumbleHigh = -1;
+    private int padRumbleMode = 1; // 0=Off, 1=Safe BT (single-motor 160ms/200ms, no cancel spam), 2=Full USB
     private long lastRumbleAtMs = 0L;
 
     /**
-     * Native Android gamepad rumble (SDL2's ANDROID_JoystickRumble returns SDL_Unsupported for Bluetooth pads).
-     * Rate-limited (100 ms) and quantized to prevent Bluetooth HID write queue overflows (HID_HostWriteDev status:8)
-     * that cause DualShock 4 / Bluetooth controllers to disconnect mid-match.
+     * Native Android gamepad rumble.
+     * Mode 0: completely disabled (0 Bluetooth HID output packets ever).
+     * Mode 1 (Safe BT): single-motor 160 ms finite pulse, 200 ms cooldown, capped amplitude (180),
+     *   and NO cancel() HID spam so Xiaomi MiuiBluetooth / DualShock 4 never hits HID_HostWriteDev status:8.
+     * Mode 2 (Full USB): dual-motor rumble with 120 ms cooldown.
      */
     public void setControllerRumble(String spec) {
         try {
-            if (spec == null) {
+            if (padRumbleMode == 0 || spec == null) {
                 return;
             }
-            SharedPreferences sp = getSharedPreferences("bo1_launcher_prefs", MODE_PRIVATE);
-            rumbleEnabled = sp.getInt("padRumble", 1) != 0;
             String[] parts = spec.trim().split("\\s+");
             if (parts.length < 2) {
                 return;
             }
-            int low = rumbleEnabled ? Math.max(0, Math.min(255, Integer.parseInt(parts[0]))) : 0;
-            int high = rumbleEnabled ? Math.max(0, Math.min(255, Integer.parseInt(parts[1]))) : 0;
+            int low = Math.max(0, Math.min(255, Integer.parseInt(parts[0])));
+            int high = Math.max(0, Math.min(255, Integer.parseInt(parts[1])));
 
             long now = SystemClock.uptimeMillis();
             boolean stopping = (low == 0 && high == 0);
-            if (stopping && lastRumbleLow == 0 && lastRumbleHigh == 0) {
+            if (stopping && padRumbleMode == 1) {
+                // In Safe BT mode, short 160 ms pulses stop automatically; skip redundant HID cancel packets.
                 return;
             }
-            if (!stopping) {
-                boolean smallDelta = Math.abs(low - lastRumbleLow) < 16 && Math.abs(high - lastRumbleHigh) < 16;
-                if (smallDelta && (now - lastRumbleAtMs) < 220L) {
-                    return;
-                }
-                if ((now - lastRumbleAtMs) < 100L) {
-                    return;
-                }
+            long cooldown = (padRumbleMode == 1) ? 200L : 120L;
+            if (!stopping && (now - lastRumbleAtMs) < cooldown) {
+                return;
             }
-            lastRumbleLow = low;
-            lastRumbleHigh = high;
             lastRumbleAtMs = now;
 
             int[] devIds = InputDevice.getDeviceIds();
@@ -179,26 +178,29 @@ public class Bo1Activity extends SDLActivity {
                         if (vm != null) {
                             int[] vibIds = vm.getVibratorIds();
                             if (vibIds != null && vibIds.length > 0) {
-                                if (!rumbleLogged && (low > 0 || high > 0)) {
+                                if (!rumbleLogged && !stopping) {
                                     rumbleLogged = true;
-                                    Log.i("BO1Rumble", "Using VibratorManager on '" + dev.getName()
-                                            + "' (pass=" + pass + ", motors=" + vibIds.length
-                                            + ", low=" + low + ", high=" + high + ")");
+                                    Log.i("BO1Rumble", "VibratorManager on '" + dev.getName()
+                                            + "' mode=" + padRumbleMode + " motors=" + vibIds.length);
                                 }
-                                if (low <= 0 && high <= 0) {
+                                if (stopping) {
                                     vm.cancel();
-                                } else if (vibIds.length >= 2) {
+                                } else if (padRumbleMode == 2 && vibIds.length >= 2) {
                                     CombinedVibration.ParallelCombination combo = CombinedVibration.startParallel();
                                     if (low > 0) {
-                                        combo.addVibrator(vibIds[0], VibrationEffect.createOneShot(350, low));
+                                        combo.addVibrator(vibIds[0], VibrationEffect.createOneShot(240, low));
                                     }
                                     if (high > 0) {
-                                        combo.addVibrator(vibIds[1], VibrationEffect.createOneShot(350, high));
+                                        combo.addVibrator(vibIds[1], VibrationEffect.createOneShot(240, high));
                                     }
                                     vm.vibrate(combo.combine());
                                 } else {
-                                    int amp = Math.max(low, high);
-                                    vm.vibrate(CombinedVibration.createParallel(VibrationEffect.createOneShot(350, amp)));
+                                    // Safe BT: single motor only (1 HID write instead of 2) + gentle cap (180) + 160 ms pulse
+                                    int amp = Math.max(1, Math.min(padRumbleMode == 1 ? 180 : 255, Math.max(low, high)));
+                                    CombinedVibration single = CombinedVibration.startParallel()
+                                            .addVibrator(vibIds[0], VibrationEffect.createOneShot(160, amp))
+                                            .combine();
+                                    vm.vibrate(single);
                                 }
                                 return;
                             }
@@ -207,16 +209,15 @@ public class Bo1Activity extends SDLActivity {
                     @SuppressWarnings("deprecation")
                     Vibrator vib = dev.getVibrator();
                     if (vib != null && vib.hasVibrator()) {
-                        if (!rumbleLogged && (low > 0 || high > 0)) {
+                        if (!rumbleLogged && !stopping) {
                             rumbleLogged = true;
-                            Log.i("BO1Rumble", "Using legacy Vibrator on '" + dev.getName()
-                                    + "' (pass=" + pass + ", low=" + low + ", high=" + high + ")");
+                            Log.i("BO1Rumble", "Legacy Vibrator on '" + dev.getName() + "' mode=" + padRumbleMode);
                         }
-                        int amp = Math.max(low, high);
+                        int amp = Math.max(0, Math.min(padRumbleMode == 1 ? 180 : 255, Math.max(low, high)));
                         if (amp <= 0) {
                             vib.cancel();
                         } else {
-                            vib.vibrate(VibrationEffect.createOneShot(350, amp));
+                            vib.vibrate(VibrationEffect.createOneShot(160, amp));
                         }
                         return;
                     }
