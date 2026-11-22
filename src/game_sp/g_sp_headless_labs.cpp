@@ -264,6 +264,9 @@ static int g_zmGivePerkHandle;
 static cmd_function_s s_zmSaveCmd, s_zmLoadCmd;
 static bool s_zmCmdsRegistered;
 
+static const int kZmMaxTriggers = 128;
+static const int kZmMaxDoors = 96;
+
 struct ZmSavedWeapon
 {
     char name[64];
@@ -275,12 +278,13 @@ struct ZmMapTrigger
 {
     int entNum;
     float origZ;
+    float origCenterZ;
     bool isPower;
 };
 
 struct ZmCheckpoint
 {
-    int phase;            // 0 = idle, 1 = open doors & power, 2 = restore player gear/score/pos
+    int phase;            // 0 = idle, 1 = power & doors, 2 = retry power-gated doors, 3 = player gear/score/pos
     int spawnTime;
     char map[64];
     int round;
@@ -297,7 +301,7 @@ struct ZmCheckpoint
     float yaw;
     bool power;
     int doorCount;
-    int doors[48];
+    int doors[kZmMaxDoors];
     char activeWeapon[64];
     int weaponCount;
     ZmSavedWeapon weapons[12];
@@ -306,7 +310,7 @@ struct ZmCheckpoint
 };
 
 static ZmCheckpoint s_zmCp;
-static ZmMapTrigger s_mapTriggers[64];
+static ZmMapTrigger s_mapTriggers[kZmMaxTriggers];
 static int s_mapTriggerCount;
 static bool s_mapTriggersCaptured;
 static bool s_powerOn;
@@ -324,13 +328,44 @@ static bool ZmIsPowerSwitch(const gentity_s *ent)
     if (!ent || !ent->r.inuse || !ent->targetname)
         return false;
     const char *tn = SL_ConvertToString(ent->targetname, SCRIPTINSTANCE_SERVER);
-    return tn && (!strcmp(tn, "use_elec_switch") || !strcmp(tn, "power_trigger_left") || !strcmp(tn, "power_trigger_right"));
+    return tn && (!strcmp(tn, "use_elec_switch") || !strcmp(tn, "use_power_switch")
+        || !strcmp(tn, "use_master_switch") || !strcmp(tn, "power_trigger_left")
+        || !strcmp(tn, "power_trigger_right"));
+}
+
+static float ZmTriggerCenterZ(const gentity_s *ent)
+{
+    return 0.5f * (ent->r.absmin[2] + ent->r.absmax[2]);
+}
+
+static const ZmMapTrigger *ZmFindTriggerSnapshot(int entNum)
+{
+    for (int i = 0; i < s_mapTriggerCount; ++i)
+    {
+        if (s_mapTriggers[i].entNum == entNum)
+            return &s_mapTriggers[i];
+    }
+    return nullptr;
+}
+
+static bool ZmIsDoorOpened(int entNum)
+{
+    if (entNum < 0 || entNum >= level.num_entities)
+        return true;
+    const gentity_s *ent = &g_entities[entNum];
+    if (!ent->r.inuse || !ent->r.linked)
+        return true;
+    const ZmMapTrigger *mt = ZmFindTriggerSnapshot(entNum);
+    if (mt)
+        return (ent->r.currentOrigin[2] < mt->origZ - 200.0f)
+            || (ZmTriggerCenterZ(ent) < mt->origCenterZ - 200.0f);
+    return ZmTriggerCenterZ(ent) < -5000.0f;
 }
 
 static void ZmCaptureInitialTriggers()
 {
     s_mapTriggerCount = 0;
-    for (int i = 0; i < level.num_entities && s_mapTriggerCount < 64; ++i)
+    for (int i = 0; i < level.num_entities && s_mapTriggerCount < kZmMaxTriggers; ++i)
     {
         const gentity_s *ent = &g_entities[i];
         const bool isDoor = ZmIsDoorOrDebris(ent);
@@ -340,6 +375,7 @@ static void ZmCaptureInitialTriggers()
         ZmMapTrigger &mt = s_mapTriggers[s_mapTriggerCount++];
         mt.entNum = i;
         mt.origZ = ent->r.currentOrigin[2];
+        mt.origCenterZ = ZmTriggerCenterZ(ent);
         mt.isPower = isPow;
     }
     s_mapTriggersCaptured = true;
@@ -447,7 +483,7 @@ static bool ZmParseCheckpointFile(const char *path, ZmCheckpoint *cp)
         }
         else if (!strncmp(line, "power=", 6))
             cp->power = atoi(line + 6) != 0;
-        else if (!strncmp(line, "door=", 5) && cp->doorCount < 48)
+        else if (!strncmp(line, "door=", 5) && cp->doorCount < kZmMaxDoors)
             cp->doors[cp->doorCount++] = atoi(line + 5);
         else if (!strncmp(line, "active=", 7))
             snprintf(cp->activeWeapon, sizeof(cp->activeWeapon), "%s", line + 7);
@@ -544,9 +580,7 @@ static void G_SP_ZmSave_f()
         const ZmMapTrigger &mt = s_mapTriggers[i];
         if (mt.isPower || mt.entNum < 0 || mt.entNum >= level.num_entities)
             continue;
-        const gentity_s *ent = &g_entities[mt.entNum];
-        const bool opened = !ent->r.inuse || !ent->r.linked || (ent->r.currentOrigin[2] < mt.origZ - 200.0f);
-        if (opened)
+        if (ZmIsDoorOpened(mt.entNum))
         {
             fprintf(f, "door=%d\n", mt.entNum);
             ++savedDoors;
@@ -605,6 +639,83 @@ static void G_SP_ZmLoad_f()
         safe, tmp.map));
 }
 
+static void ZmRunDoorAndPowerPass(gentity_s *player, bool includePower)
+{
+    gclient_s *client = player->client;
+    playerState_s *ps = &client->ps;
+
+    bool needPower = includePower && s_zmCp.power && !s_powerOn;
+    bool needDoor = false;
+    for (int i = 0; i < s_zmCp.doorCount; ++i)
+    {
+        if (!ZmIsDoorOpened(s_zmCp.doors[i]))
+        {
+            needDoor = true;
+            break;
+        }
+    }
+    if (!needPower && !needDoor)
+        return;
+
+    // Bind level_bgs, clear blackscreen control-freeze flag (0x400000), and hold Use (bit 3) while running
+    // Scr_RunCurrentThreads immediately after each Scr_Notify so door_buy() / debris_think() execute with
+    // `who UseButtonPressed() == 1` instead of waking on the next frame after ClientThink clears buttons.
+    bgs_t *savedBgs = bgs;
+    bgs = &level_bgs;
+    const int savedPmFlags = ps->pm_flags;
+    ps->pm_flags &= ~0x400000;
+    const auto savedButtons = client->button_bits;
+    const auto savedButtonsSince = client->button_bitsSinceLastFrame;
+    client->button_bits.setBit(3u);
+    client->button_bitsSinceLastFrame.setBit(3u);
+    client->sess.cs.score.score = 1000000;
+
+    if (needPower)
+    {
+        for (int i = 0; i < s_mapTriggerCount; ++i)
+        {
+            if (!s_mapTriggers[i].isPower)
+                continue;
+            const int entNum = s_mapTriggers[i].entNum;
+            if (entNum >= 0 && entNum < level.num_entities && ZmIsPowerSwitch(&g_entities[entNum]) && !ZmIsDoorOpened(entNum))
+            {
+                Scr_AddEntity(player, SCRIPTINSTANCE_SERVER);
+                Scr_Notify(&g_entities[entNum], scr_const.trigger, 1u);
+                Scr_RunCurrentThreads(SCRIPTINSTANCE_SERVER);
+            }
+        }
+    }
+
+    for (int i = 0; i < s_zmCp.doorCount; ++i)
+    {
+        const int entNum = s_zmCp.doors[i];
+        if (ZmIsDoorOpened(entNum))
+            continue; // Also skips sibling trigger on the other side once the first side opens & disables both
+        gentity_s *trig = &g_entities[entNum];
+        if (ZmIsDoorOrDebris(trig))
+        {
+            Scr_AddEntity(player, SCRIPTINSTANCE_SERVER);
+            Scr_Notify(trig, scr_const.trigger, 1u);
+            Scr_RunCurrentThreads(SCRIPTINSTANCE_SERVER);
+        }
+    }
+
+    client->button_bits = savedButtons;
+    client->button_bitsSinceLastFrame = savedButtonsSince;
+    ps->pm_flags = savedPmFlags;
+    bgs = savedBgs;
+}
+
+static bool ZmHasPendingDoors()
+{
+    for (int i = 0; i < s_zmCp.doorCount; ++i)
+    {
+        if (!ZmIsDoorOpened(s_zmCp.doors[i]))
+            return true;
+    }
+    return false;
+}
+
 void G_SP_ZmCheckpointFrame()
 {
     if (!G_SP_IsZombieMode())
@@ -620,57 +731,32 @@ void G_SP_ZmCheckpointFrame()
     gclient_s *client = player->client;
     playerState_s *ps = &client->ps;
 
-    // Phase 1: Re-open saved doors/debris and power switch natively via BO1's own trigger scripts.
+    // Phase 1: Turn on power & re-open saved doors/debris natively via BO1's own trigger scripts.
     if (s_zmCp.phase == 1)
     {
         if (level.time < s_zmCp.spawnTime + 1000)
             return;
         if (!s_mapTriggersCaptured)
             ZmCaptureInitialTriggers();
-        if (s_zmCp.doorCount > 0 || s_zmCp.power)
-        {
-            client->sess.cs.score.score = 1000000;
-            // door_buy() in maps/_zombiemode_blockers.gsc checks `who UseButtonPressed()` (button bit 3)
-            // synchronously when the "trigger" notify wakes it up.
-            const auto savedButtons = client->button_bits;
-            const auto savedButtonsSince = client->button_bitsSinceLastFrame;
-            client->button_bits.setBit(3u);
-            client->button_bitsSinceLastFrame.setBit(3u);
-            for (int i = 0; i < s_zmCp.doorCount; ++i)
-            {
-                const int entNum = s_zmCp.doors[i];
-                if (entNum < 0 || entNum >= level.num_entities)
-                    continue;
-                gentity_s *trig = &g_entities[entNum];
-                if (ZmIsDoorOrDebris(trig) && trig->r.linked)
-                {
-                    Scr_AddEntity(player, SCRIPTINSTANCE_SERVER);
-                    Scr_Notify(trig, scr_const.trigger, 1u);
-                }
-            }
-            if (s_zmCp.power)
-            {
-                for (int i = 0; i < s_mapTriggerCount; ++i)
-                {
-                    if (!s_mapTriggers[i].isPower)
-                        continue;
-                    const int entNum = s_mapTriggers[i].entNum;
-                    if (entNum >= 0 && entNum < level.num_entities && ZmIsPowerSwitch(&g_entities[entNum]))
-                    {
-                        Scr_AddEntity(player, SCRIPTINSTANCE_SERVER);
-                        Scr_Notify(&g_entities[entNum], scr_const.trigger, 1u);
-                    }
-                }
-            }
-            client->button_bits = savedButtons;
-            client->button_bitsSinceLastFrame = savedButtonsSince;
-        }
-        s_zmCp.phase = 2;
+        ZmRunDoorAndPowerPass(player, true);
+        s_zmCp.phase = (ZmHasPendingDoors() || (s_zmCp.power && !s_powerOn)) ? 2 : 3;
         return;
     }
 
-    // Phase 2: Restore perks (crash-free G_SP_SetPerk), health, weapons + ammo, exact score, and position.
-    if (level.time < s_zmCp.spawnTime + 1400)
+    // Phase 2: Retry any doors that were waiting on power_on or initial blackscreen fade.
+    if (s_zmCp.phase == 2)
+    {
+        if (s_zmCp.power && !s_powerOn && level.time < s_zmCp.spawnTime + 2200)
+            return;
+        if (level.time < s_zmCp.spawnTime + 1450)
+            return;
+        ZmRunDoorAndPowerPass(player, false);
+        s_zmCp.phase = 3;
+        return;
+    }
+
+    // Phase 3: Restore perks (crash-free G_SP_SetPerk + give_perk), health, weapons + ammo, exact score, and position.
+    if (level.time < s_zmCp.spawnTime + 1500)
         return;
     s_zmCp.phase = 0;
 
@@ -774,9 +860,15 @@ void G_SP_ZmCheckpointFrame()
         TeleportPlayer(player, s_zmCp.pos, angles);
     }
 
-    Com_Printf(16, "zm_load: restored %s R%d pts=%d kills=%d weapons=%d perks=%d (give_perk=%d) doors=%d power=%d\n",
+    int openedDoors = 0;
+    for (int i = 0; i < s_zmCp.doorCount; ++i)
+    {
+        if (ZmIsDoorOpened(s_zmCp.doors[i]))
+            ++openedDoors;
+    }
+    Com_Printf(16, "zm_load: restored %s R%d pts=%d kills=%d weapons=%d perks=%d (give_perk=%d) doors=%d/%d power=%d\n",
         s_zmCp.map, s_zmCp.round, s_zmCp.score, s_zmCp.kills, s_zmCp.weaponCount, s_zmCp.perkCount,
-        g_zmGivePerkHandle, s_zmCp.doorCount, s_zmCp.power ? 1 : 0);
+        g_zmGivePerkHandle, openedDoors, s_zmCp.doorCount, s_zmCp.power ? 1 : 0);
 }
 
 void G_SP_HeadlessRoundFields(scriptInstance_t inst)
