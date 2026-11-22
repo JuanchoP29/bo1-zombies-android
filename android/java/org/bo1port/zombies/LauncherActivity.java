@@ -95,8 +95,9 @@ public class LauncherActivity extends Activity {
     private int touchStyle = 0;        // 0=Shooter, 1=Xbox, 2=PlayStation
     private int touchPreset = 0;       // 0=Shooter 2F, 1=Claw 4F, 2=Gamepad
     private int touchSensPct = 12;     // 4..30 -> 0.4..3.0
-    private int touchOpacityPct = 28;  // 10..100 -> 0.10..1.00
+    private int touchOpacityPct = 45;  // 10..100 -> 0.10..1.00
     private int padDeadzonePct = 10;   // 5..25 -> 0.05..0.25
+    private int padRumble = 1;         // 1=On (rate-limited safe), 0=Off
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -140,8 +141,9 @@ public class LauncherActivity extends Activity {
         touchStyle = prefs.getInt("touchStyle", 0);
         touchPreset = prefs.getInt("touchPreset", 0);
         touchSensPct = prefs.getInt("touchSensPct", 12);
-        touchOpacityPct = prefs.getInt("touchOpacityPct", 28);
+        touchOpacityPct = prefs.getInt("touchOpacityPct", 45);
         padDeadzonePct = prefs.getInt("padDeadzonePct", 10);
+        padRumble = prefs.getInt("padRumble", 1);
     }
 
     private void saveSettings() {
@@ -161,6 +163,7 @@ public class LauncherActivity extends Activity {
                 .putInt("touchSensPct", touchSensPct)
                 .putInt("touchOpacityPct", touchOpacityPct)
                 .putInt("padDeadzonePct", padDeadzonePct)
+                .putInt("padRumble", padRumble)
                 .apply();
     }
 
@@ -857,6 +860,13 @@ public class LauncherActivity extends Activity {
         });
 
         LinearLayout padCard = makeCard("MANDO (BLUETOOTH / USB)");
+        addSpinnerRow(padCard, "Vibración del mando", new String[] { "Activada (segura BT)", "Desactivada" },
+                padRumble == 1 ? 0 : 1, new IntConsumer() {
+                    @Override
+                    public void accept(int v) {
+                        padRumble = (v == 0) ? 1 : 0;
+                    }
+                });
         addSliderRow(padCard, "Zona muerta de sticks", 5, 25, padDeadzonePct, "", 0.01f, new IntConsumer() {
             @Override
             public void accept(int v) {

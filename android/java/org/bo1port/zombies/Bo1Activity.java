@@ -1,9 +1,11 @@
 package org.bo1port.zombies;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CombinedVibration;
+import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
@@ -116,23 +118,48 @@ public class Bo1Activity extends SDLActivity {
     }
 
     private boolean rumbleLogged;
+    private boolean rumbleEnabled = true;
+    private int lastRumbleLow = -1;
+    private int lastRumbleHigh = -1;
+    private long lastRumbleAtMs = 0L;
 
     /**
      * Native Android gamepad rumble (SDL2's ANDROID_JoystickRumble returns SDL_Unsupported for Bluetooth pads).
-     * Uses InputDevice.getVibratorManager() on Android 12+ for dual-motor rumble (low/high 0..255), with
-     * InputDevice.getVibrator() fallback on Android 8-11.
+     * Rate-limited (100 ms) and quantized to prevent Bluetooth HID write queue overflows (HID_HostWriteDev status:8)
+     * that cause DualShock 4 / Bluetooth controllers to disconnect mid-match.
      */
     public void setControllerRumble(String spec) {
         try {
             if (spec == null) {
                 return;
             }
+            SharedPreferences sp = getSharedPreferences("bo1_launcher_prefs", MODE_PRIVATE);
+            rumbleEnabled = sp.getInt("padRumble", 1) != 0;
             String[] parts = spec.trim().split("\\s+");
             if (parts.length < 2) {
                 return;
             }
-            int low = Math.max(0, Math.min(255, Integer.parseInt(parts[0])));
-            int high = Math.max(0, Math.min(255, Integer.parseInt(parts[1])));
+            int low = rumbleEnabled ? Math.max(0, Math.min(255, Integer.parseInt(parts[0]))) : 0;
+            int high = rumbleEnabled ? Math.max(0, Math.min(255, Integer.parseInt(parts[1]))) : 0;
+
+            long now = SystemClock.uptimeMillis();
+            boolean stopping = (low == 0 && high == 0);
+            if (stopping && lastRumbleLow == 0 && lastRumbleHigh == 0) {
+                return;
+            }
+            if (!stopping) {
+                boolean smallDelta = Math.abs(low - lastRumbleLow) < 16 && Math.abs(high - lastRumbleHigh) < 16;
+                if (smallDelta && (now - lastRumbleAtMs) < 220L) {
+                    return;
+                }
+                if ((now - lastRumbleAtMs) < 100L) {
+                    return;
+                }
+            }
+            lastRumbleLow = low;
+            lastRumbleHigh = high;
+            lastRumbleAtMs = now;
+
             int[] devIds = InputDevice.getDeviceIds();
             // Pass 0: standard gamepad/joystick InputDevice; Pass 1: any external non-virtual device with a vibrator
             for (int pass = 0; pass < 2; pass++) {
@@ -163,15 +190,15 @@ public class Bo1Activity extends SDLActivity {
                                 } else if (vibIds.length >= 2) {
                                     CombinedVibration.ParallelCombination combo = CombinedVibration.startParallel();
                                     if (low > 0) {
-                                        combo.addVibrator(vibIds[0], VibrationEffect.createOneShot(5000, low));
+                                        combo.addVibrator(vibIds[0], VibrationEffect.createOneShot(350, low));
                                     }
                                     if (high > 0) {
-                                        combo.addVibrator(vibIds[1], VibrationEffect.createOneShot(5000, high));
+                                        combo.addVibrator(vibIds[1], VibrationEffect.createOneShot(350, high));
                                     }
                                     vm.vibrate(combo.combine());
                                 } else {
                                     int amp = Math.max(low, high);
-                                    vm.vibrate(CombinedVibration.createParallel(VibrationEffect.createOneShot(5000, amp)));
+                                    vm.vibrate(CombinedVibration.createParallel(VibrationEffect.createOneShot(350, amp)));
                                 }
                                 return;
                             }
@@ -189,7 +216,7 @@ public class Bo1Activity extends SDLActivity {
                         if (amp <= 0) {
                             vib.cancel();
                         } else {
-                            vib.vibrate(VibrationEffect.createOneShot(5000, amp));
+                            vib.vibrate(VibrationEffect.createOneShot(350, amp));
                         }
                         return;
                     }
