@@ -419,7 +419,7 @@ static void G_SP_ZmSave_f()
     }
 
     const int score = client->sess.cs.score.score;
-    const int maxHp = ps->maxHealth > 100 ? ps->maxHealth : (player->maxHealth > 100 ? player->maxHealth : 100);
+    const int maxHp = client->sess.maxHealth > 100 ? client->sess.maxHealth : (player->maxHealth > 100 ? player->maxHealth : 100);
     const int hp = player->health > 0 ? player->health : maxHp;
     const char *activeName = "";
     if (ps->weapon)
@@ -519,7 +519,9 @@ void G_SP_ZmCheckpointFrame()
     if (hasJugg || s_zmCp.maxHealth > 100)
     {
         const int targetMax = s_zmCp.maxHealth > 100 ? s_zmCp.maxHealth : 250;
-        ps->maxHealth = targetMax;
+        client->sess.maxHealth = targetMax;
+        ps->stats[2] = targetMax;
+        ps->stats[0] = targetMax;
         player->maxHealth = targetMax;
         player->health = targetMax;
     }
