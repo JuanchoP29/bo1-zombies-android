@@ -42,6 +42,7 @@
 #include <bgame/bg_mantle.h>
 #include <game/g_weapon.h>
 #include <game_mp/g_client_script_cmd_mp.h>
+#include <game_mp/g_spawn_mp.h>
 #include <qcommon/cmd.h>
 #include "g_sp_player_state.h"
 #include <cstring>
@@ -266,15 +267,28 @@ struct ZmSavedWeapon
     int stock;
 };
 
+struct ZmMapTrigger
+{
+    int entNum;
+    float origZ;
+    bool isPower;
+};
+
 struct ZmCheckpoint
 {
-    bool pending;
+    int phase;            // 0 = idle, 1 = open doors & power, 2 = restore player gear/score/pos
     int spawnTime;
     char map[64];
     int round;
     int score;
     int health;
     int maxHealth;
+    bool hasPos;
+    float pos[3];
+    float yaw;
+    bool power;
+    int doorCount;
+    int doors[48];
     char activeWeapon[64];
     int weaponCount;
     ZmSavedWeapon weapons[12];
@@ -283,6 +297,44 @@ struct ZmCheckpoint
 };
 
 static ZmCheckpoint s_zmCp;
+static ZmMapTrigger s_mapTriggers[64];
+static int s_mapTriggerCount;
+static bool s_mapTriggersCaptured;
+static bool s_powerOn;
+
+static bool ZmIsDoorOrDebris(const gentity_s *ent)
+{
+    if (!ent || !ent->r.inuse || !ent->targetname)
+        return false;
+    const char *tn = SL_ConvertToString(ent->targetname, SCRIPTINSTANCE_SERVER);
+    return tn && (!strcmp(tn, "zombie_door") || !strcmp(tn, "zombie_debris"));
+}
+
+static bool ZmIsPowerSwitch(const gentity_s *ent)
+{
+    if (!ent || !ent->r.inuse || !ent->targetname)
+        return false;
+    const char *tn = SL_ConvertToString(ent->targetname, SCRIPTINSTANCE_SERVER);
+    return tn && !strcmp(tn, "use_elec_switch");
+}
+
+static void ZmCaptureInitialTriggers()
+{
+    s_mapTriggerCount = 0;
+    for (int i = 0; i < level.num_entities && s_mapTriggerCount < 64; ++i)
+    {
+        const gentity_s *ent = &g_entities[i];
+        const bool isDoor = ZmIsDoorOrDebris(ent);
+        const bool isPow = !isDoor && ZmIsPowerSwitch(ent);
+        if (!isDoor && !isPow)
+            continue;
+        ZmMapTrigger &mt = s_mapTriggers[s_mapTriggerCount++];
+        mt.entNum = i;
+        mt.origZ = ent->r.currentOrigin[2];
+        mt.isPower = isPow;
+    }
+    s_mapTriggersCaptured = true;
+}
 
 static const char *kZmPerkList[] = {
     "specialty_armorvest",
@@ -367,6 +419,15 @@ static bool ZmParseCheckpointFile(const char *path, ZmCheckpoint *cp)
             cp->health = atoi(line + 7);
         else if (!strncmp(line, "maxhealth=", 10))
             cp->maxHealth = atoi(line + 10);
+        else if (!strncmp(line, "pos=", 4))
+        {
+            if (sscanf(line + 4, "%f %f %f %f", &cp->pos[0], &cp->pos[1], &cp->pos[2], &cp->yaw) >= 3)
+                cp->hasPos = true;
+        }
+        else if (!strncmp(line, "power=", 6))
+            cp->power = atoi(line + 6) != 0;
+        else if (!strncmp(line, "door=", 5) && cp->doorCount < 48)
+            cp->doors[cp->doorCount++] = atoi(line + 5);
         else if (!strncmp(line, "active=", 7))
             snprintf(cp->activeWeapon, sizeof(cp->activeWeapon), "%s", line + 7);
         else if (!strncmp(line, "weapon=", 7) && cp->weaponCount < 12)
@@ -440,8 +501,27 @@ static void G_SP_ZmSave_f()
     fprintf(f, "score=%d\n", score);
     fprintf(f, "health=%d\n", hp);
     fprintf(f, "maxhealth=%d\n", maxHp);
+    fprintf(f, "pos=%.1f %.1f %.1f %.1f\n",
+        player->r.currentOrigin[0], player->r.currentOrigin[1], player->r.currentOrigin[2],
+        ps->viewangles[1]);
+    fprintf(f, "power=%d\n", s_powerOn ? 1 : 0);
     fprintf(f, "time=%lld\n", (long long)time(nullptr));
     fprintf(f, "active=%s\n", activeName);
+
+    int savedDoors = 0;
+    for (int i = 0; i < s_mapTriggerCount; ++i)
+    {
+        const ZmMapTrigger &mt = s_mapTriggers[i];
+        if (mt.isPower || mt.entNum < 0 || mt.entNum >= level.num_entities)
+            continue;
+        const gentity_s *ent = &g_entities[mt.entNum];
+        const bool opened = !ent->r.inuse || !ent->r.linked || (ent->r.currentOrigin[2] < mt.origZ - 200.0f);
+        if (opened)
+        {
+            fprintf(f, "door=%d\n", mt.entNum);
+            ++savedDoors;
+        }
+    }
 
     int savedWeapons = 0;
     for (int i = 0; i < 15; ++i)
@@ -471,8 +551,8 @@ static void G_SP_ZmSave_f()
         }
     }
     fclose(f);
-    Com_Printf(16, "zm_save: saved '%s' (%s R%d pts=%d weapons=%d perks=%d)\n",
-        slot, mapName ? mapName : "", round, score, savedWeapons, savedPerks);
+    Com_Printf(16, "zm_save: saved '%s' (%s R%d pts=%d weapons=%d perks=%d doors=%d power=%d)\n",
+        slot, mapName ? mapName : "", round, score, savedWeapons, savedPerks, savedDoors, s_powerOn ? 1 : 0);
 }
 
 static void G_SP_ZmLoad_f()
@@ -497,28 +577,71 @@ static void G_SP_ZmLoad_f()
 
 void G_SP_ZmCheckpointFrame()
 {
-    if (!s_zmCp.pending || !G_SP_IsZombieMode())
+    if (!G_SP_IsZombieMode())
+        return;
+    if (!s_mapTriggersCaptured && level.time >= 600)
+        ZmCaptureInitialTriggers();
+    if (s_zmCp.phase == 0)
         return;
     if (!g_entities[0].r.inuse || !g_entities[0].client || g_entities[0].health <= 0)
         return;
-    if (level.time < s_zmCp.spawnTime + 1200)
-        return;
 
-    s_zmCp.pending = false;
     gentity_s *player = &g_entities[0];
     gclient_s *client = player->client;
     playerState_s *ps = &client->ps;
 
-    // 1. Restore Perks + Health
+    // Phase 1: Re-open saved doors/debris and power switch natively via BO1's own trigger scripts.
+    if (s_zmCp.phase == 1)
+    {
+        if (level.time < s_zmCp.spawnTime + 1000)
+            return;
+        if (!s_mapTriggersCaptured)
+            ZmCaptureInitialTriggers();
+        if (s_zmCp.doorCount > 0 || s_zmCp.power)
+        {
+            client->sess.cs.score.score = 1000000;
+            for (int i = 0; i < s_zmCp.doorCount; ++i)
+            {
+                const int entNum = s_zmCp.doors[i];
+                if (entNum < 0 || entNum >= level.num_entities)
+                    continue;
+                gentity_s *trig = &g_entities[entNum];
+                if (ZmIsDoorOrDebris(trig))
+                {
+                    Scr_AddEntity(player, SCRIPTINSTANCE_SERVER);
+                    Scr_Notify(trig, scr_const.trigger, 1u);
+                }
+            }
+            if (s_zmCp.power)
+            {
+                for (int i = 0; i < s_mapTriggerCount; ++i)
+                {
+                    if (!s_mapTriggers[i].isPower)
+                        continue;
+                    const int entNum = s_mapTriggers[i].entNum;
+                    if (entNum >= 0 && entNum < level.num_entities && ZmIsPowerSwitch(&g_entities[entNum]))
+                    {
+                        Scr_AddEntity(player, SCRIPTINSTANCE_SERVER);
+                        Scr_Notify(&g_entities[entNum], scr_const.trigger, 1u);
+                    }
+                }
+            }
+        }
+        s_zmCp.phase = 2;
+        return;
+    }
+
+    // Phase 2: Restore perks (crash-free G_SP_SetPerk), health, weapons + ammo, exact score, and position.
+    if (level.time < s_zmCp.spawnTime + 1400)
+        return;
+    s_zmCp.phase = 0;
+
+    // 1. Restore Perks + Health (G_SP_SetPerk handles all Zombies perks without MP's 52-perk assert)
     bool hasJugg = false;
     for (int i = 0; i < s_zmCp.perkCount; ++i)
     {
-        const unsigned int perk = BG_GetPerkIndexForName(s_zmCp.perks[i]);
-        if (perk)
-        {
-            BG_SetPerk(ps->perks, perk);
-            BG_SetPerk(client->sess.cs.perks, perk);
-        }
+        if (s_zmCp.perks[i][0])
+            G_SP_SetPerk(client, s_zmCp.perks[i], true);
         if (!strcmp(s_zmCp.perks[i], "specialty_armorvest"))
             hasJugg = true;
     }
@@ -535,7 +658,6 @@ void G_SP_ZmCheckpointFrame()
     // 2. Restore Weapons + Exact Clip & Reserve Ammo
     if (s_zmCp.weaponCount > 0)
     {
-        // Clear default starting primary weapons so we don't exceed slot cap
         for (int i = 0; i < 15; ++i)
         {
             const unsigned int held = ps->heldWeapons[i].weapon;
@@ -556,7 +678,7 @@ void G_SP_ZmCheckpointFrame()
             {
                 G_InitializeAmmo(player, w, 0, 0);
                 const int clipIdx = BG_ClipForWeapon(w);
-                if (clipIdx)
+                if (clipIdx > 0)
                 {
                     int c = sw.clip;
                     const int maxClip = BG_GetClipSize(w);
@@ -586,22 +708,34 @@ void G_SP_ZmCheckpointFrame()
             G_SelectWeaponIndex(0, (int)selectIdx);
     }
 
-    // 3. Restore Score
+    // 3. Restore Exact Score (after Phase 1 door scripts finished)
     client->sess.cs.score.score = s_zmCp.score;
     CalculateRanks();
 
-    Com_Printf(16, "zm_load: restored %s R%d pts=%d weapons=%d perks=%d\n",
-        s_zmCp.map, s_zmCp.round, s_zmCp.score, s_zmCp.weaponCount, s_zmCp.perkCount);
+    // 4. Restore Saved Position (if present)
+    if (s_zmCp.hasPos)
+    {
+        float angles[3] = { 0.0f, s_zmCp.yaw, 0.0f };
+        TeleportPlayer(player, s_zmCp.pos, angles);
+    }
+
+    Com_Printf(16, "zm_load: restored %s R%d pts=%d weapons=%d perks=%d doors=%d power=%d\n",
+        s_zmCp.map, s_zmCp.round, s_zmCp.score, s_zmCp.weaponCount, s_zmCp.perkCount,
+        s_zmCp.doorCount, s_zmCp.power ? 1 : 0);
 }
 
 void G_SP_HeadlessRoundFields(scriptInstance_t inst)
 {
     if (inst != SCRIPTINSTANCE_SERVER)
         return;
-    // Always capture canonical round_number / first_round keys for Zombies Checkpoints (and headless tests).
+    // Always capture canonical round_number / first_round keys and reset per-map trigger snapshot.
     g_roundNumberKey = 0;
     g_firstRoundKey = 0;
     g_nextDogRoundKey = 0;
+    s_mapTriggersCaptured = false;
+    s_mapTriggerCount = 0;
+    s_powerOn = false;
+    s_zmCp.phase = 0;
     if (!g_zmAutoloadDvar)
         g_zmAutoloadDvar = _Dvar_RegisterString("bo1_zm_autoload", "", 0, "mod (zombies): checkpoint slot to restore on map load");
     if (!s_zmCmdsRegistered)
@@ -648,15 +782,18 @@ void G_SP_HeadlessRoundNotify(scriptInstance_t inst, unsigned int owner, unsigne
 {
     if (inst != SCRIPTINSTANCE_SERVER || owner != gScrVarPub[inst].levelId || !G_SP_IsZombieMode())
         return;
+    const char *nstr = name ? SL_ConvertToString(name, inst) : nullptr;
+    if (nstr && !strcmp(nstr, "power_on"))
+        s_powerOn = true;
     // Zombies Checkpoint round restore on "begin_spawning"
     if (g_roundNumberKey && g_zmAutoloadDvar && g_zmAutoloadDvar->current.string[0]
-        && name && !strcmp(SL_ConvertToString(name, inst), "begin_spawning"))
+        && nstr && !strcmp(nstr, "begin_spawning"))
     {
         char path[560];
         if (ZmBuildSavePath(g_zmAutoloadDvar->current.string, path, sizeof(path), false)
             && ZmParseCheckpointFile(path, &s_zmCp))
         {
-            s_zmCp.pending = true;
+            s_zmCp.phase = 1;
             s_zmCp.spawnTime = level.time;
             unsigned int id = FindVariable(inst, owner, g_roundNumberKey);
             if (id && GetValueType(inst, id) == VAR_INTEGER)
