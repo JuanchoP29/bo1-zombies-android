@@ -10,7 +10,9 @@ import android.os.VibratorManager;
 import android.util.Log;
 import android.view.Display;
 import android.view.InputDevice;
+import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.widget.RelativeLayout;
 
 import java.io.File;
 import java.io.RandomAccessFile;
@@ -36,8 +38,10 @@ public class Bo1Activity extends SDLActivity {
     static native void ssRequestBinds(String keys);
     static native void ssVisible(boolean visible);
     static native void ssLog(String text);
+    static native int touchHudRead(float[] buf);
 
     private SecondScreen secondScreen;
+    private TouchHudOverlay touchOverlay;
 
     @Override
     protected String[] getLibraries() {
@@ -76,6 +80,16 @@ public class Bo1Activity extends SDLActivity {
         } catch (Throwable t) {
             secondScreen = null;   // no second-screen controller; the game is not affected
         }
+        try {
+            if (mLayout != null) {
+                touchOverlay = new TouchHudOverlay(this);
+                RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+                mLayout.addView(touchOverlay, lp);
+            }
+        } catch (Throwable t) {
+            touchOverlay = null;
+        }
     }
 
     @Override
@@ -84,11 +98,17 @@ public class Bo1Activity extends SDLActivity {
         if (secondScreen != null) {
             secondScreen.start();
         }
+        if (touchOverlay != null) {
+            touchOverlay.startOverlay();
+        }
     }
 
     @Override
     protected void onStop() {
         setControllerRumble("0 0");
+        if (touchOverlay != null) {
+            touchOverlay.stopOverlay();
+        }
         if (secondScreen != null) {
             secondScreen.stop();
         }
@@ -189,6 +209,9 @@ public class Bo1Activity extends SDLActivity {
 
     /** From the engine, on its thread: "<bo1_second_screen> <in a game> <Zombies>" (SecondScreen.onState). */
     public void secondScreenState(String state) {
+        if (touchOverlay != null) {
+            touchOverlay.setNativesReady();
+        }
         if (secondScreen != null) {
             secondScreen.onState(state);
         }

@@ -115,10 +115,13 @@ public class LauncherActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        loadSettings();
         if (currentTab == 0) {
             refreshGameStatus();
         } else if (currentTab == 1) {
             refreshDriverList();
+        } else if (currentTab == 3) {
+            selectTab(3);
         }
     }
 
@@ -460,15 +463,6 @@ public class LauncherActivity extends Activity {
                 Toast.makeText(LauncherActivity.this, "Usando carpeta por defecto", Toast.LENGTH_SHORT).show();
             }
         }));
-
-        LinearLayout modeCard = makeCard("MODO DE INICIO");
-        addSpinnerRow(modeCard, "Modo al iniciar", new String[] { "Zombies", "Multijugador" },
-                modeZombies == 1 ? 0 : 1, new IntConsumer() {
-                    @Override
-                    public void accept(int v) {
-                        modeZombies = (v == 0) ? 1 : 0;
-                    }
-                });
 
         refreshGameStatus();
     }
@@ -812,7 +806,15 @@ public class LauncherActivity extends Activity {
     // ---- TAB 4: CONTROLS ----
 
     private void buildControlsTab() {
-        LinearLayout touchCard = makeCard("CONTROLES EN PANTALLA");
+        LinearLayout touchCard = makeCard("CONTROLES EN PANTALLA (HD + MENÚ)");
+
+        touchCard.addView(makeActionButton("EDITAR CONTROLES EN PANTALLA COMPLETA (1:1)", true, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                saveSettings();
+                startActivity(new Intent(LauncherActivity.this, TouchEditorActivity.class));
+            }
+        }));
 
         addSpinnerRow(touchCard, "Controles táctiles", new String[] { "Activados", "Desactivados" },
                 touchEnabled == 1 ? 0 : 1, new IntConsumer() {
@@ -822,8 +824,8 @@ public class LauncherActivity extends Activity {
                     }
                 });
 
-        addSpinnerRow(touchCard, "Estilo de botones", new String[] {
-                "Shooter Táctico", "Xbox Digital", "PlayStation Digital"
+        addSpinnerRow(touchCard, "Estilo visual", new String[] {
+                "CODM / Shooter HD", "Xbox Digital", "PlayStation Digital"
         }, touchStyle, new IntConsumer() {
             @Override
             public void accept(int v) {
@@ -832,7 +834,7 @@ public class LauncherActivity extends Activity {
         });
 
         addSpinnerRow(touchCard, "Perfil precargado", new String[] {
-                "Shooter 2 Dedos", "Claw 4 Dedos", "Gamepad Clásico"
+                "CODM (2 Dedos)", "Claw 4 Dedos", "Gamepad / Xbox"
         }, touchPreset, new IntConsumer() {
             @Override
             public void accept(int v) {
@@ -896,8 +898,14 @@ public class LauncherActivity extends Activity {
         saveSettings();
 
         int maxFps = (fpsIndex == 0) ? 60 : (fpsIndex == 1 ? 90 : (fpsIndex == 2 ? 120 : 0));
+        int aimDrag = prefs.getInt("touchAimDrag", 1);
+        int autoSprint = prefs.getInt("touchAutoSprint", 1);
+        int sprintThreshPct = prefs.getInt("touchSprintThreshPct", 85);
+        int aimOnFire = prefs.getInt("touchAimOnFire", 0);
+        int autoFire = prefs.getInt("touchAutoFire", 1);
+
         StringBuilder args = new StringBuilder();
-        args.append("+set bo1_zombies ").append(modeZombies);
+        args.append("+set bo1_zombies 1");
         args.append(" +set bo1_engine_fps 1");
         args.append(" +set bo1_renderer ").append(renderer);
         args.append(" +set r_vsync ").append(vsync);
@@ -909,6 +917,11 @@ public class LauncherActivity extends Activity {
         args.append(" +set bo1_touch ").append(touchEnabled);
         args.append(" +set bo1_touch_style ").append(touchStyle);
         args.append(" +set bo1_touch_preset ").append(touchPreset);
+        args.append(" +set bo1_touch_aim_drag ").append(aimDrag);
+        args.append(" +set bo1_touch_autosprint ").append(autoSprint);
+        args.append(String.format(Locale.US, " +set bo1_touch_sprint_thresh %.2f", sprintThreshPct * 0.01f));
+        args.append(" +set bo1_touch_aim_fire ").append(aimOnFire);
+        args.append(" +set bo1_touch_autofire ").append(autoFire);
         args.append(String.format(Locale.US, " +set bo1_touch_sensitivity %.2f", touchSensPct * 0.1f));
         args.append(String.format(Locale.US, " +set bo1_touch_opacity %.2f", touchOpacityPct * 0.01f));
         args.append(String.format(Locale.US, " +set gpad_stick_deadzone_min %.2f", padDeadzonePct * 0.01f));

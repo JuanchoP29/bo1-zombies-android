@@ -12,6 +12,12 @@ extern "C" {
 // From the engine, every frame: bo1_touch, whether a game is being played with no menu open, bo1_touch_sensitivity,
 // bo1_touch_scale and the picture's width / height.
 void bo1_native_touch_settings(int enabled, int ingame, float sensitivity, float scale, float aspect);
+// Tactile response options (from dvars, every frame).
+void bo1_native_touch_response(int aimDrag, int autoSprint, float sprintThresh, int aimOnFire);
+// Visual presentation options (from dvars, every frame) for the Android HD vector overlay.
+void bo1_native_touch_visual(int visualStyle, float opacity);
+// Fill a flat float buffer with the current HUD state for the Android HD vector overlay. Returns count of floats written.
+int bo1_native_touch_hud_read(float *out, int maxFloats);
 // The weapon in hand, every frame: whether it fires one shot (or burst) per pull, and how many pulls per second
 // a held FIRE makes for such a weapon (0: none, the trigger is just held).
 void bo1_native_touch_weapon(int semiAuto, float pullsPerSecond);

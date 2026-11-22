@@ -45,6 +45,8 @@
 // engine files; these declarations have no pointer-to-pointer parameters)
 extern "C" {
 void bo1_native_touch_settings(int enabled, int ingame, float sensitivity, float scale, float aspect);
+void bo1_native_touch_response(int aimDrag, int autoSprint, float sprintThresh, int aimOnFire);
+void bo1_native_touch_visual(int visualStyle, float opacity);
 void bo1_native_touch_layout_file(const char *path);
 int bo1_native_touch_wants_fingers(void);
 int bo1_native_touch_shape(int index, float *x, float *y, float *halfWidth, float *halfHeight, int *held, int *style,
@@ -68,6 +70,10 @@ const dvar_t *bo1_touch_scale;
 const dvar_t *bo1_touch_opacity;
 const dvar_t *bo1_touch_autofire;
 const dvar_t *bo1_touch_autofire_rate;
+const dvar_t *bo1_touch_aim_drag;
+const dvar_t *bo1_touch_autosprint;
+const dvar_t *bo1_touch_sprint_thresh;
+const dvar_t *bo1_touch_aim_fire;
 cmd_function_s s_editCmd, s_resetCmd;
 bool s_registered;
 bool s_fileGiven;
@@ -170,9 +176,13 @@ void CL_Touch_Draw()
         bo1_touch_preset = _Dvar_RegisterInt("bo1_touch_preset", 0, 0, 2, 1u, "mod (touch): layout preset: 0 Shooter 2-finger, 1 Claw 4-finger, 2 Classic Gamepad");
         bo1_touch_sensitivity = _Dvar_RegisterFloat("bo1_touch_sensitivity", 1.2f, 0.2f, 5.0f, 1u, "mod (touch): look sensitivity of a finger");
         bo1_touch_scale = _Dvar_RegisterFloat("bo1_touch_scale", 1.0f, 0.5f, 2.0f, 1u, "mod (touch): size of the on-screen controls");
-        bo1_touch_opacity = _Dvar_RegisterFloat("bo1_touch_opacity", 0.28f, 0.05f, 1.0f, 1u, "mod (touch): opacity of the on-screen controls");
+        bo1_touch_opacity = _Dvar_RegisterFloat("bo1_touch_opacity", 0.45f, 0.05f, 1.0f, 1u, "mod (touch): opacity of the on-screen controls");
         bo1_touch_autofire = _Dvar_RegisterInt("bo1_touch_autofire", 1, 0, 1, 1u, "mod (touch): a held FIRE keeps firing weapons that fire once per pull");
         bo1_touch_autofire_rate = _Dvar_RegisterFloat("bo1_touch_autofire_rate", 5.0f, 1.0f, 8.0f, 1u, "mod (touch): trigger pulls per second of a held FIRE");
+        bo1_touch_aim_drag = _Dvar_RegisterInt("bo1_touch_aim_drag", 1, 0, 1, 1u, "mod (touch): drag camera while holding AIM");
+        bo1_touch_autosprint = _Dvar_RegisterInt("bo1_touch_autosprint", 1, 0, 1, 1u, "mod (touch): sprint when pushing move stick forward");
+        bo1_touch_sprint_thresh = _Dvar_RegisterFloat("bo1_touch_sprint_thresh", 0.85f, 0.45f, 0.98f, 1u, "mod (touch): sprint threshold fraction on move stick");
+        bo1_touch_aim_fire = _Dvar_RegisterInt("bo1_touch_aim_fire", 0, 0, 1, 1u, "mod (touch): primary FIRE also holds AIM (left fire stays hip-fire)");
         // mod (native): the second-screen controller (Settings > EXTRAS)
         bo1_second_screen = _Dvar_RegisterInt("bo1_second_screen", 1, 0, 1, 1u, "mod (native): trackpads and grip buttons on a dual-screen device's second display");
         Cmd_AddCommandInternal("touch_edit", EditCommand, &s_editCmd);
@@ -198,6 +208,9 @@ void CL_Touch_Draw()
     const bool ingame = state == CA_ACTIVE && !Com_IsSPFrontEndRunning() && ui && !ui->keyCatchers && !CL_JoinMenu_IsOpen() && !CL_Extras_IsOpen() && !CL_Play_IsOpen();
     bo1_native_touch_settings(bo1_touch->current.integer, ingame, bo1_touch_sensitivity->current.value,
         bo1_touch_scale->current.value, screenW / screenH);
+    bo1_native_touch_response(bo1_touch_aim_drag->current.integer, bo1_touch_autosprint->current.integer,
+        bo1_touch_sprint_thresh->current.value, bo1_touch_aim_fire->current.integer);
+    bo1_native_touch_visual(bo1_touch_style->current.integer, bo1_touch_opacity->current.value);
     bo1_native_second_screen_settings(bo1_second_screen->current.integer, ingame);   // mod (native)
     // the weapon in hand: full-automatic weapons (and the minigun) fire while the trigger is held; the others
     // once per pull
@@ -209,6 +222,12 @@ void CL_Touch_Draw()
         semiAuto = def && def->fireType != WEAPON_FIRETYPE_FULLAUTO && def->fireType != WEAPON_FIRETYPE_MINIGUN;
     }
     bo1_native_touch_weapon(semiAuto, bo1_touch_autofire->current.integer ? bo1_touch_autofire_rate->current.value : 0.0f);
+#ifdef __ANDROID__
+    // On Android, TouchHudOverlay renders the crisp hardware-accelerated HD vector controls (and menu nav pad),
+    // keeping BO1's 2D render command buffer completely free.
+    if (!bo1_native_touch_editing())
+        return;
+#endif
     if (!bo1_native_touch_wants_fingers() || !cls.rendererStarted || !cls.whiteMaterial)
         return;
 

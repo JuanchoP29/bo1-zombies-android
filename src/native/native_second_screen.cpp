@@ -38,6 +38,8 @@ extern "C" {
 // src/web/web_input.cpp
 void bo1_native_input_motion(int dx, int dy, int x, int y, int width, int height);
 void bo1_native_input_keycode(int key, int down);
+// src/native/native_touch.cpp
+int bo1_native_touch_hud_read(float *out, int maxFloats);
 #ifdef __ANDROID__
 // native_extras.cpp
 void bo1_native_call_activity(const char *method, const char *text);
@@ -130,6 +132,21 @@ void JNICALL Log(JNIEnv *env, jclass, jstring text)
     fflush(stdout);
 }
 
+jint JNICALL TouchHudRead(JNIEnv *env, jclass, jfloatArray arr)
+{
+    if (!arr)
+        return 0;
+    const jsize len = env->GetArrayLength(arr);
+    if (len < 12)
+        return 0;
+    float tmp[160];
+    const int cap = (int)(len < 160 ? len : 160);
+    const int n = bo1_native_touch_hud_read(tmp, cap);
+    if (n > 0)
+        env->SetFloatArrayRegion(arr, 0, n, tmp);
+    return n;
+}
+
 // the methods of Bo1Activity (static native) this file provides
 void Register()
 {
@@ -148,6 +165,7 @@ void Register()
         {"ssRequestBinds", "(Ljava/lang/String;)V", (void *)RequestBinds},
         {"ssVisible", "(Z)V", (void *)Visible},
         {"ssLog", "(Ljava/lang/String;)V", (void *)Log},
+        {"touchHudRead", "([F)I", (void *)TouchHudRead},
     };
     jclass type = env->GetObjectClass(activity);
     const jint result = env->RegisterNatives(type, kMethods, (jint)(sizeof(kMethods) / sizeof(kMethods[0])));
