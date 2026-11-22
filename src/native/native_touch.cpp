@@ -65,6 +65,7 @@ const Control kControls[] = {
     { "right", ">", 0.145f, 0.275f, 0.034f, GPAD_RAW_DPAD_RIGHT, 0, BUTTON, false },
     { "pause", "II", 0.965f, 0.065f, 0.040f, GPAD_RAW_START, 0, BUTTON, false },
     { "scores", "TAB", 0.890f, 0.065f, 0.040f, GPAD_RAW_BACK, 0, BUTTON, false },
+    { "sprint", "RUN", 0.250f, 0.560f, 0.052f, GPAD_RAW_LEFT_THUMB, 0, BUTTON, false },
     // only while the layout is edited
     { "done", "DONE", 0.440f, 0.080f, 0.050f, 0, 0, EDIT_DONE, false },
     { "reset", "RESET", 0.560f, 0.080f, 0.050f, 0, 0, EDIT_RESET, false },
@@ -108,6 +109,8 @@ float s_sprintThresh = 0.85f;   // 0.50..0.98
 bool s_aimOnFire = false;       // primary FIRE also holds AIM (left fire2 stays hip-fire)
 int s_visualStyle = 0;          // 0 CODM/Shooter HD, 1 Xbox Digital, 2 PlayStation Digital
 float s_opacity = 0.45f;        // 0.05..1.0
+float s_stickDefaultX = 0.155f, s_stickDefaultY = 0.780f;
+float s_stickRadius = kStickRadius;
 float s_stickX, s_stickY;       // the stick's center while a finger holds it
 float s_stickDX, s_stickDY;     // -1..1, y up
 bool s_stickHeld;
@@ -136,6 +139,7 @@ const Place kPresetClaw[kControlCount] = {
     { 0.310f, 0.210f, 0.032f, true }, // right
     { 0.965f, 0.065f, 0.038f, true }, // pause
     { 0.895f, 0.065f, 0.038f, true }, // scores
+    { 0.250f, 0.560f, 0.050f, true }, // sprint
     { 0.440f, 0.080f, 0.050f, true }, // done
     { 0.560f, 0.080f, 0.050f, true }, // reset
 };
@@ -157,6 +161,7 @@ const Place kPresetGamepad[kControlCount] = {
     { 0.165f, 0.710f, 0.036f, true }, // right
     { 0.555f, 0.075f, 0.040f, true }, // pause (START / OPTIONS)
     { 0.445f, 0.075f, 0.040f, true }, // scores (BACK / SHARE)
+    { 0.065f, 0.540f, 0.048f, true }, // sprint (L3)
     { 0.440f, 0.180f, 0.050f, true }, // done
     { 0.560f, 0.180f, 0.050f, true }, // reset
 };
@@ -183,6 +188,9 @@ void Defaults()
             s_place[i].visible = true;
         }
     }
+    s_stickDefaultX = 0.155f;
+    s_stickDefaultY = 0.780f;
+    s_stickRadius = kStickRadius;
     s_placed = true;
 }
 
@@ -202,6 +210,16 @@ void Load()
         const int n = sscanf(line, "%31s %f %f %f %d", name, &x, &y, &size, &vis);
         if (n < 4)
             continue;
+        if (!strcmp(name, "stick"))
+        {
+            if (x >= 0.02f && x <= 0.98f && y >= 0.03f && y <= 0.97f && size >= 0.06f && size <= 0.25f)
+            {
+                s_stickDefaultX = x;
+                s_stickDefaultY = y;
+                s_stickRadius = size;
+            }
+            continue;
+        }
         for (int i = 0; i < kControlCount; ++i)
         {
             if (strcmp(name, kControls[i].name) || kControls[i].kind == EDIT_DONE || kControls[i].kind == EDIT_RESET)
@@ -223,6 +241,7 @@ void Save()
     FILE *file = s_file[0] ? fopen(s_file, "w") : nullptr;
     if (!file)
         return;
+    fprintf(file, "stick %.4f %.4f %.4f 1\n", s_stickDefaultX, s_stickDefaultY, s_stickRadius);
     for (int i = 0; i < kControlCount; ++i)
         if (kControls[i].kind != EDIT_DONE && kControls[i].kind != EDIT_RESET)
             fprintf(file, "%s %.4f %.4f %.4f %d\n", kControls[i].name, s_place[i].x, s_place[i].y, s_place[i].size,
@@ -275,8 +294,9 @@ bool Wanted()
 void MoveStick(float x, float y)
 {
     // (x in units of the picture's height, like y)
-    float dx = (x - s_stickX) * s_aspect / (kStickRadius * s_scale);
-    float dy = (y - s_stickY) / (kStickRadius * s_scale);
+    const float rad = s_stickRadius * s_scale;
+    float dx = (x - s_stickX) * s_aspect / rad;
+    float dy = (y - s_stickY) / rad;
     const float length = sqrtf(dx * dx + dy * dy);
     if (length > 1.0f)
     {
@@ -489,7 +509,7 @@ extern "C" void bo1_native_touch_read(unsigned *buttons, float *lt, float *rt, f
     }
     *lx = s_stickDX;
     *ly = s_stickDY;
-    if (s_autoSprint && s_stickHeld && sqrtf(s_stickDX * s_stickDX + s_stickDY * s_stickDY) >= s_sprintThresh && s_stickDY > 0.45f)
+    if (s_autoSprint && s_stickHeld && sqrtf(s_stickDX * s_stickDX + s_stickDY * s_stickDY) >= s_sprintThresh)
         *buttons |= GPAD_RAW_LEFT_THUMB;
     // whole pixels; the rest stays for the next frame
     *lookX = (int)s_lookX;
@@ -630,7 +650,7 @@ extern "C" int bo1_native_touch_hud_read(float *out, int maxFloats)
     out[0] = (float)mode;
     out[1] = (float)s_visualStyle;
     out[2] = s_opacity;
-    out[3] = s_scale;
+    out[3] = s_stickRadius * s_scale;
     out[4] = s_stickHeld ? 1.0f : 0.0f;
     out[5] = s_stickX;
     out[6] = s_stickY;
@@ -672,6 +692,7 @@ extern "C" int bo1_native_touch_hud_read(float *out, int maxFloats)
         else if (kControls[i].button == GPAD_RAW_DPAD_DOWN) st = 21;
         else if (kControls[i].button == GPAD_RAW_DPAD_LEFT) st = 22;
         else if (kControls[i].button == GPAD_RAW_DPAD_RIGHT) st = 23;
+        else if (kControls[i].button == GPAD_RAW_LEFT_THUMB) st = 24;
 
         const bool held = kControls[i].kind == TOGGLE ? s_toggled[i] : s_held[i] > 0;
         out[pos++] = s_place[i].x;

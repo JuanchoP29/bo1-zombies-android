@@ -243,7 +243,7 @@ public final class TouchHudOverlay extends View {
 
         int visualStyle = Math.round(buf[1]);
         float opacity = buf[2];
-        float scale = buf[3];
+        float stickFrac = buf[3];
         boolean stickHeld = buf[4] > 0.5f;
         float stickX = buf[5] * w;
         float stickY = buf[6] * h;
@@ -254,9 +254,9 @@ public final class TouchHudOverlay extends View {
         int btnCount = Math.round(buf[11]);
 
         if (stickHeld) {
-            float stickR = 0.13f * scale * h;
+            float stickR = Math.max(0.06f, stickFrac) * h;
             renderer.drawJoystick(canvas, stickX, stickY, stickR, stickDX, stickDY,
-                    opacity, autoSprint, sprintThresh, false);
+                    opacity, autoSprint, sprintThresh, false, false);
         }
 
         int pos = 12;

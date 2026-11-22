@@ -28,6 +28,7 @@ public final class TouchHudRenderer {
     public static final int ST_DOWN = 21;
     public static final int ST_LEFT = 22;
     public static final int ST_RIGHT = 23;
+    public static final int ST_SPRINT = 24;
 
     public static final int VISUAL_CODM = 0;
     public static final int VISUAL_XBOX = 1;
@@ -72,6 +73,7 @@ public final class TouchHudRenderer {
             case ST_TAC: return "TÁCTICA";
             case ST_PAUSE: return "PAUSA";
             case ST_SCORES: return "MARCADOR";
+            case ST_SPRINT: return "CORRER";
             default: return "";
         }
     }
@@ -169,11 +171,12 @@ public final class TouchHudRenderer {
     }
 
     public void drawJoystick(Canvas c, float cx, float cy, float r, float dx, float dy,
-                             float opacity, boolean autoSprint, float sprintThresh, boolean showCaption) {
+                             float opacity, boolean autoSprint, float sprintThresh,
+                             boolean showCaption, boolean selected) {
         float baseAlpha = Math.max(0.12f, Math.min(1.0f, opacity));
         float strokeAlpha = Math.min(1.0f, baseAlpha * 1.75f);
         float mag = (float) Math.hypot(dx, dy);
-        boolean sprinting = autoSprint && mag >= sprintThresh && dy > 0.45f;
+        boolean sprinting = autoSprint && mag >= sprintThresh;
 
         // Outer translucent disc
         fillPaint.setColor(0xFF0E141C);
@@ -182,18 +185,24 @@ public final class TouchHudRenderer {
 
         // Outer crisp ring
         ringPaint.setStrokeWidth(Math.max(2.2f, r * 0.025f));
-        ringPaint.setColor(sprinting ? 0xFFF5921E : 0xFFD6E0EC);
-        ringPaint.setAlpha(Math.round(strokeAlpha * 255f));
+        ringPaint.setColor(selected || sprinting ? 0xFFF5921E : 0xFFD6E0EC);
+        ringPaint.setAlpha(Math.round((selected ? 1.0f : strokeAlpha) * 255f));
         c.drawCircle(cx, cy, r, ringPaint);
 
-        // Sprint arc + double chevron (^) at top of joystick
+        if (selected) {
+            accentPaint.setStrokeWidth(Math.max(3.0f, r * 0.035f));
+            accentPaint.setColor(0xFFF5921E);
+            accentPaint.setAlpha(235);
+            c.drawCircle(cx, cy, r * 1.08f, accentPaint);
+        }
+
+        // Subtle inner walk/sprint threshold ring + top sprint chevrons
         if (autoSprint) {
-            float arcR = r * 0.84f;
-            oval.set(cx - arcR, cy - arcR, cx + arcR, cy + arcR);
-            accentPaint.setStrokeWidth(Math.max(2.5f, r * 0.03f));
+            float threshR = r * Math.max(0.45f, Math.min(0.95f, sprintThresh));
+            accentPaint.setStrokeWidth(Math.max(1.8f, r * 0.02f));
             accentPaint.setColor(sprinting ? 0xFFF5921E : 0xFFC5D2E0);
-            accentPaint.setAlpha(Math.round((sprinting ? 1.0f : strokeAlpha * 0.75f) * 255f));
-            c.drawArc(oval, -125f, 70f, false, accentPaint);
+            accentPaint.setAlpha(Math.round((sprinting ? 0.90f : strokeAlpha * 0.45f) * 255f));
+            c.drawCircle(cx, cy, threshR, accentPaint);
 
             float chevY = cy - r * 0.62f;
             float chevW = r * 0.13f;
@@ -288,6 +297,7 @@ public final class TouchHudRenderer {
             case ST_DOWN: drawChevron(c, cx, cy, r * 0.42f, 180); break;
             case ST_LEFT: drawChevron(c, cx, cy, r * 0.42f, 270); break;
             case ST_RIGHT: drawChevron(c, cx, cy, r * 0.42f, 90); break;
+            case ST_SPRINT: drawCenteredText(c, cx, cy, r, "L3"); break;
             default: break;
         }
     }
@@ -329,6 +339,7 @@ public final class TouchHudRenderer {
             case ST_DOWN: drawChevron(c, cx, cy, r * 0.42f, 180); break;
             case ST_LEFT: drawChevron(c, cx, cy, r * 0.42f, 270); break;
             case ST_RIGHT: drawChevron(c, cx, cy, r * 0.42f, 90); break;
+            case ST_SPRINT: drawCenteredText(c, cx, cy, r, "L3"); break;
             default: break;
         }
     }
@@ -375,6 +386,7 @@ public final class TouchHudRenderer {
             case ST_DOWN: drawChevron(c, cx, cy, r * 0.42f, 180); break;
             case ST_LEFT: drawChevron(c, cx, cy, r * 0.42f, 270); break;
             case ST_RIGHT: drawChevron(c, cx, cy, r * 0.42f, 90); break;
+            case ST_SPRINT: drawSprintIcon(c, cx, cy, r * 0.50f); break;
             default: break;
         }
     }
@@ -507,5 +519,22 @@ public final class TouchHudRenderer {
         c.drawLine(cx - s * 0.42f, cy - s * 0.20f, cx + s * 0.42f, cy - s * 0.20f, iconPaint);
         c.drawLine(cx - s * 0.42f, cy + s * 0.05f, cx + s * 0.42f, cy + s * 0.05f, iconPaint);
         c.drawLine(cx - s * 0.42f, cy + s * 0.30f, cx + s * 0.18f, cy + s * 0.30f, iconPaint);
+    }
+
+    private void drawSprintIcon(Canvas c, float cx, float cy, float s) {
+        // Head
+        c.drawCircle(cx + s * 0.28f, cy - s * 0.56f, s * 0.20f, iconFillPaint);
+        // Leaning torso
+        c.drawLine(cx + s * 0.14f, cy - s * 0.32f, cx - s * 0.12f, cy + s * 0.16f, iconPaint);
+        // Arms pumping
+        c.drawLine(cx + s * 0.08f, cy - s * 0.18f, cx + s * 0.54f, cy - s * 0.04f, iconPaint);
+        c.drawLine(cx + s * 0.08f, cy - s * 0.18f, cx - s * 0.38f, cy - s * 0.24f, iconPaint);
+        // Striding legs
+        c.drawLine(cx - s * 0.12f, cy + s * 0.16f, cx + s * 0.32f, cy + s * 0.44f, iconPaint);
+        c.drawLine(cx + s * 0.32f, cy + s * 0.44f, cx + s * 0.18f, cy + s * 0.76f, iconPaint);
+        c.drawLine(cx - s * 0.12f, cy + s * 0.16f, cx - s * 0.54f, cy + s * 0.62f, iconPaint);
+        // Speed lines behind runner
+        c.drawLine(cx - s * 0.78f, cy - s * 0.16f, cx - s * 0.52f, cy - s * 0.16f, iconPaint);
+        c.drawLine(cx - s * 0.84f, cy + s * 0.12f, cx - s * 0.50f, cy + s * 0.12f, iconPaint);
     }
 }
