@@ -259,6 +259,7 @@ static unsigned int g_nextDogRoundKey;
 
 static const dvar_s *g_zmAutoloadDvar;
 static unsigned int g_firstRoundKey;
+static unsigned int g_zombieMoveSpeedKey;
 static int g_zmGivePerkHandle;
 static cmd_function_s s_zmSaveCmd, s_zmLoadCmd;
 static bool s_zmCmdsRegistered;
@@ -315,7 +316,7 @@ static bool ZmIsDoorOrDebris(const gentity_s *ent)
     if (!ent || !ent->r.inuse || !ent->targetname)
         return false;
     const char *tn = SL_ConvertToString(ent->targetname, SCRIPTINSTANCE_SERVER);
-    return tn && (!strcmp(tn, "zombie_door") || !strcmp(tn, "zombie_debris"));
+    return tn && (!strcmp(tn, "zombie_door") || !strcmp(tn, "zombie_debris") || !strcmp(tn, "zombie_airlock_buy"));
 }
 
 static bool ZmIsPowerSwitch(const gentity_s *ent)
@@ -323,7 +324,7 @@ static bool ZmIsPowerSwitch(const gentity_s *ent)
     if (!ent || !ent->r.inuse || !ent->targetname)
         return false;
     const char *tn = SL_ConvertToString(ent->targetname, SCRIPTINSTANCE_SERVER);
-    return tn && !strcmp(tn, "use_elec_switch");
+    return tn && (!strcmp(tn, "use_elec_switch") || !strcmp(tn, "power_trigger_left") || !strcmp(tn, "power_trigger_right"));
 }
 
 static void ZmCaptureInitialTriggers()
@@ -629,13 +630,19 @@ void G_SP_ZmCheckpointFrame()
         if (s_zmCp.doorCount > 0 || s_zmCp.power)
         {
             client->sess.cs.score.score = 1000000;
+            // door_buy() in maps/_zombiemode_blockers.gsc checks `who UseButtonPressed()` (button bit 3)
+            // synchronously when the "trigger" notify wakes it up.
+            const auto savedButtons = client->button_bits;
+            const auto savedButtonsSince = client->button_bitsSinceLastFrame;
+            client->button_bits.setBit(3u);
+            client->button_bitsSinceLastFrame.setBit(3u);
             for (int i = 0; i < s_zmCp.doorCount; ++i)
             {
                 const int entNum = s_zmCp.doors[i];
                 if (entNum < 0 || entNum >= level.num_entities)
                     continue;
                 gentity_s *trig = &g_entities[entNum];
-                if (ZmIsDoorOrDebris(trig))
+                if (ZmIsDoorOrDebris(trig) && trig->r.linked)
                 {
                     Scr_AddEntity(player, SCRIPTINSTANCE_SERVER);
                     Scr_Notify(trig, scr_const.trigger, 1u);
@@ -655,6 +662,8 @@ void G_SP_ZmCheckpointFrame()
                     }
                 }
             }
+            client->button_bits = savedButtons;
+            client->button_bitsSinceLastFrame = savedButtonsSince;
         }
         s_zmCp.phase = 2;
         return;
@@ -774,9 +783,10 @@ void G_SP_HeadlessRoundFields(scriptInstance_t inst)
 {
     if (inst != SCRIPTINSTANCE_SERVER)
         return;
-    // Always capture canonical round_number / first_round keys and reset per-map trigger snapshot.
+    // Always capture canonical round_number / first_round / zombie_move_speed keys and reset per-map trigger snapshot.
     g_roundNumberKey = 0;
     g_firstRoundKey = 0;
+    g_zombieMoveSpeedKey = 0;
     g_nextDogRoundKey = 0;
     g_zmGivePerkHandle = Scr_GetFunctionHandle(inst, "maps/_zombiemode_perks", "give_perk");
     s_mapTriggersCaptured = false;
@@ -795,6 +805,8 @@ void G_SP_HeadlessRoundFields(scriptInstance_t inst)
     g_roundNumberKey = string ? gScrCompilePub[inst].canonicalStrings[string] : 0;
     string = SL_FindString("first_round", inst);
     g_firstRoundKey = string ? gScrCompilePub[inst].canonicalStrings[string] : 0;
+    string = SL_FindString("zombie_move_speed", inst);
+    g_zombieMoveSpeedKey = string ? gScrCompilePub[inst].canonicalStrings[string] : 0;
 
     if (!Sys_IsHeadless())
         return;
@@ -854,6 +866,12 @@ void G_SP_HeadlessRoundNotify(scriptInstance_t inst, unsigned int owner, unsigne
                 unsigned int fid = FindVariable(inst, owner, g_firstRoundKey);
                 if (fid && GetValueType(inst, fid) == VAR_INTEGER)
                     GetVariableValueAddress(inst, fid)->u.intValue = 0;
+            }
+            if (s_zmCp.round > 1 && g_zombieMoveSpeedKey)
+            {
+                unsigned int mid = FindVariable(inst, owner, g_zombieMoveSpeedKey);
+                if (mid && GetValueType(inst, mid) == VAR_INTEGER)
+                    GetVariableValueAddress(inst, mid)->u.intValue = s_zmCp.round * 8;
             }
         }
         Dvar_SetString((dvar_s *)g_zmAutoloadDvar, "");
