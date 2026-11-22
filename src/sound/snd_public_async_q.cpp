@@ -63,6 +63,9 @@ snd_command *__cdecl SND_GetNewCommand()
     }
     else
     {
+#if defined(__GNUC__) || defined(__clang__)
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+#endif
         cmd = &g_snd.commands[g_snd.command_free];
         g_snd.command_free = SND_NextCommandIndex(g_snd.command_free);
     }
@@ -152,6 +155,9 @@ unsigned int __cdecl SND_CommandPush(snd_command *cmd)
         }
         cmd->timestamp = Sys_Milliseconds();
         g_snd.command_q[g_snd.command_q_head] = cmd;
+#if defined(__GNUC__) || defined(__clang__)
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+#endif
         g_snd.command_q_head = SND_NextCommandIndex(g_snd.command_q_head);
         if ( g_snd.command_q_head < g_snd.command_q_tail )
             SND_LogCommandQHWM(g_snd.command_q_head + 1024 - g_snd.command_q_tail);
@@ -196,8 +202,10 @@ const snd_command *__cdecl SND_CommandPeek()
     }
     if ( g_snd.command_q_tail == g_snd.command_q_head )
         return 0;
-    else
-        return g_snd.command_q[g_snd.command_q_tail];
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+#endif
+    return g_snd.command_q[g_snd.command_q_tail];
 }
 
 void __cdecl SND_CommandPop()
@@ -252,8 +260,15 @@ void __cdecl SND_CommandPop()
     {
         __debugbreak();
     }
-    g_snd.command_q[g_snd.command_q_tail]->type = SND_COMMAND_NOP;
+    snd_command *slot = g_snd.command_q[g_snd.command_q_tail];
     g_snd.command_q[g_snd.command_q_tail] = 0;
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+#endif
+    slot->type = SND_COMMAND_NOP;
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+#endif
     g_snd.command_q_tail = SND_NextCommandIndex(g_snd.command_q_tail);
 }
 
@@ -566,6 +581,9 @@ snd_notify *__cdecl SND_GetNewNotify()
     }
     else
     {
+#if defined(__GNUC__) || defined(__clang__)
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+#endif
         cmd = &g_snd.notifies[g_snd.notify_free];
         g_snd.notify_free = SND_NextNotifyIndex(g_snd.notify_free);
     }
@@ -655,6 +673,9 @@ void __cdecl SND_NotifyPush(snd_notify *cmd)
             __debugbreak();
         }
         g_snd.notify_q[g_snd.notify_q_head] = cmd;
+#if defined(__GNUC__) || defined(__clang__)
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+#endif
         g_snd.notify_q_head = SND_NextNotifyIndex(g_snd.notify_q_head);
         if (g_snd.notify_q_head < g_snd.notify_q_tail)
             SND_LogNotifyQHWM(g_snd.notify_q_head + 512 - g_snd.notify_q_tail);
@@ -700,8 +721,10 @@ const snd_notify *__cdecl SND_NotifyPeek()
     }
     if ( g_snd.notify_q_tail == g_snd.notify_q_head )
         return 0;
-    else
-        return g_snd.notify_q[g_snd.notify_q_tail];
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+#endif
+    return g_snd.notify_q[g_snd.notify_q_tail];
 }
 
 void __cdecl SND_NotifyPop()
@@ -746,8 +769,15 @@ void __cdecl SND_NotifyPop()
     {
         __debugbreak();
     }
-    g_snd.notify_q[g_snd.notify_q_tail]->type = SND_NOTIFY_NOP;
+    snd_notify *slot = g_snd.notify_q[g_snd.notify_q_tail];
     g_snd.notify_q[g_snd.notify_q_tail] = 0;
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+#endif
+    slot->type = SND_NOTIFY_NOP;
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+#endif
     g_snd.notify_q_tail = SND_NextNotifyIndex(g_snd.notify_q_tail);
 }
 
@@ -804,27 +834,9 @@ void __cdecl SND_NotifyProcess(const snd_notify *cmd)
             break;
         case SND_NOTIFY_PLAYBACK_UPDATE:
             //PIXBeginNamedEvent(-1, "update playback");
-            if ( !cmd->context.ent_update.handle.handle
-                && !Assert_MyHandler(
-                            "C:\\projects_pc\\cod\\codsrc\\src\\sound\\snd_public_async_q.cpp",
-                            552,
-                            0,
-                            "%s",
-                            "cmd->context.playback_update.playback") )
-            {
-                __debugbreak();
-            }
-            if ( *(unsigned int *)cmd->context.ent_update.handle.handle == -1
-                && !Assert_MyHandler(
-                            "C:\\projects_pc\\cod\\codsrc\\src\\sound\\snd_public_async_q.cpp",
-                            553,
-                            0,
-                            "%s",
-                            "cmd->context.playback_update.playback->id != SND_PLAYBACKID_NOTPLAYED") )
-            {
-                __debugbreak();
-            }
             playback = cmd->context.playback_free.playback;
+            if (!playback || (unsigned int)(playback - g_snd.playbacks) >= 0x94 || playback->id == -1)
+                break;
             playback->attenuation = cmd->context.playback_update.attenuation;
             *(_QWORD *)&playback->lengthMs = *(_QWORD *)&cmd->context.playback_update.lengthMs;
             //if ( g_DXDeviceThread == GetCurrentThreadId() )

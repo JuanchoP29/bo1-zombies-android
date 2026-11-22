@@ -76,8 +76,8 @@ int s_appliedPreset = -1;
 // Crisp vector PlayStation symbols drawn with the engine's 2D quad primitive (no external textures needed).
 void DrawPsCross(float cx, float cy, float r, const float *col)
 {
-    const float t = r * 0.22f < 2.0f ? 2.0f : r * 0.22f;
-    const int steps = 12;
+    const float t = r * 0.24f < 2.0f ? 2.0f : r * 0.24f;
+    const int steps = 8;
     for (int i = 0; i < steps; ++i)
     {
         const float u = -1.0f + 2.0f * ((float)i + 0.5f) / (float)steps;
@@ -100,12 +100,12 @@ void DrawPsSquare(float cx, float cy, float r, const float *col)
 
 void DrawPsTriangle(float cx, float cy, float r, const float *col)
 {
-    const float t = r * 0.18f < 2.0f ? 2.0f : r * 0.18f;
+    const float t = r * 0.20f < 2.0f ? 2.0f : r * 0.20f;
     const float topY = cy - r * 0.76f;
     const float botY = cy + r * 0.64f;
     const float halfBase = r * 0.78f;
     R_AddCmdDrawStretchPic(cx - halfBase, botY - t * 0.5f, 2.0f * halfBase, t, 0, 0, 1, 1, col, cls.whiteMaterial);
-    const int steps = 14;
+    const int steps = 9;
     for (int i = 0; i < steps; ++i)
     {
         const float u = ((float)i + 0.5f) / (float)steps;
@@ -120,8 +120,8 @@ void DrawPsTriangle(float cx, float cy, float r, const float *col)
 // half extents (rx, ry), as horizontal strips.
 void Disc(float cx, float cy, float rx, float ry, float ringWidth, const float *fill, const float *ring)
 {
-    // a strip every two lines of the picture: the edge is as smooth as boxes get
-    const int strips = ry < 16.0f ? 16 : ry > 72.0f ? 72 : (int)ry;
+    // Cap strips to 12..20 so on-screen controls stay smooth without overflowing the 72 KB 2D render command buffer.
+    const int strips = ry < 12.0f ? 12 : ry > 20.0f ? 20 : (int)ry;
     const float inner = 1.0f - ringWidth;
     for (int i = 0; i < strips; ++i)
     {

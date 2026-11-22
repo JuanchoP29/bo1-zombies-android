@@ -1339,19 +1339,18 @@ void __cdecl SND_FreePlayback(snd_playback *playback)
 {
     if (playback)
     {
-        if ((unsigned int)(playback - g_snd.playbacks) >= 0x94
-            && !Assert_MyHandler(
-                "C:\\projects_pc\\cod\\codsrc\\src\\sound\\snd_public_async.cpp",
-                1193,
-                0,
-                "playback-g_snd.playbacks doesn't index SND_PLAYBACK_COUNT\n\t%i not in [0, %i)",
-                playback - g_snd.playbacks,
-                148))
+        if ((unsigned int)(playback - g_snd.playbacks) >= 0x94)
         {
-            __debugbreak();
+            Com_PrintWarning(9, "SND_FreePlayback: ignoring out-of-range playback (%d)\n",
+                (int)(playback - g_snd.playbacks));
+            return;
         }
-        playback->id = -1;
-        --g_snd.playbacksInUse;
+        if (playback->id != -1)
+        {
+            playback->id = -1;
+            if (g_snd.playbacksInUse > 0)
+                --g_snd.playbacksInUse;
+        }
     }
 }
 
