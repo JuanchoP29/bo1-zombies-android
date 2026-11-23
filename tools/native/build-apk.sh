@@ -44,6 +44,7 @@ if [ -f $ICON_DIR/icon-192.png ]; then
 </adaptive-icon>
 EOF
   fi
+  [ -d $SRC/res ] && cp -r $SRC/res/* $W/res/
   $BT/aapt2 compile --dir $W/res -o $W/res.zip > $W/aapt2-compile.log 2>&1 || { tail -20 $W/aapt2-compile.log; exit 1; }
   sed 's#<application#<application android:icon="@mipmap/ic_launcher"#' $SRC/AndroidManifest.xml > $W/AndroidManifest.xml
   MANIFEST=$W/AndroidManifest.xml; RES=$W/res.zip
