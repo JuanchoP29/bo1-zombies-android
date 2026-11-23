@@ -891,8 +891,9 @@ public class LauncherActivity extends Activity {
                     }
                 });
 
-        addSpinnerRow(card, "Sombras dinámicas", new String[] { "Activadas", "Desactivadas" },
-                shadows == 1 ? 0 : 1, new IntConsumer() {
+        addSpinnerRow(card, "Sombras dinámicas", new String[] {
+                "Activadas (ideal 60 FPS)", "Desactivadas (+FPS y -calor)"
+        }, shadows == 1 ? 0 : 1, new IntConsumer() {
                     @Override
                     public void accept(int v) {
                         shadows = (v == 0) ? 1 : 0;

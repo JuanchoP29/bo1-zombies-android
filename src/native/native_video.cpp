@@ -11,15 +11,9 @@
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
-#ifdef __ANDROID__
-#include <SDL2/SDL_syswm.h>
-#include <android/native_window.h>
-#include <math.h>
-#endif
 #include <d3d9shim.h>
 #include <pthread.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 extern "C" {
@@ -271,52 +265,6 @@ extern "C" int bo1_native_video_vulkan_prepare(void)
     return 1;
 }
 
-#ifdef __ANDROID__
-static int s_dpuBufW = 0, s_dpuBufH = 0;
-
-static void ApplyAndroidDpuScaling(SDL_Window *window, int bw, int bh)
-{
-    if (!window)
-        return;
-    const char *env = getenv("BO1_DPU_SCALE");
-    const bool enabled = (!env || env[0] != '0');
-
-    SDL_SysWMinfo info;
-    SDL_VERSION(&info.version);
-    if (!SDL_GetWindowWMInfo(window, &info) || !info.info.android.window)
-        return;
-    ANativeWindow *anw = (ANativeWindow *)info.info.android.window;
-
-    int dw = 0, dh = 0;
-    SDL_GetWindowSize(window, &dw, &dh);
-    if (enabled && bw > 0 && bh > 0 && dw > 0 && dh > 0 && (bw < dw || bh < dh))
-    {
-        const float aspectBuf = (float)bw / (float)bh;
-        const float aspectDisp = (float)dw / (float)dh;
-        if (fabsf(aspectBuf - aspectDisp) < 0.03f)
-        {
-            if (s_dpuBufW != bw || s_dpuBufH != bh)
-            {
-                if (ANativeWindow_setBuffersGeometry(anw, bw, bh, 0) == 0)
-                {
-                    s_dpuBufW = bw;
-                    s_dpuBufH = bh;
-                    printf("native: DPU hardware scaler active (%dx%d -> %dx%d, 0%% GPU blit)\n", bw, bh, dw, dh);
-                    fflush(stdout);
-                }
-            }
-            return;
-        }
-    }
-    if (s_dpuBufW != 0 || s_dpuBufH != 0)
-    {
-        ANativeWindow_setBuffersGeometry(anw, 0, 0, 0);
-        s_dpuBufW = 0;
-        s_dpuBufH = 0;
-    }
-}
-#endif
-
 extern "C" void *bo1_native_video_vulkan_window(int width, int height)
 {
     if (!InitVideo())
@@ -333,9 +281,6 @@ extern "C" void *bo1_native_video_vulkan_window(int width, int height)
     {
         if (!s_displayWindow)
             SDL_SetWindowSize(s_window, w, h);
-#ifdef __ANDROID__
-        ApplyAndroidDpuScaling(s_window, w, h);
-#endif
         return s_window;
     }
 #ifdef __ANDROID__
@@ -343,8 +288,6 @@ extern "C" void *bo1_native_video_vulkan_window(int width, int height)
     SDL_ShowCursor(SDL_DISABLE);   // no system pointer over the game (a mouse or a touch pad still moves the game's own)
     s_window = SDL_CreateWindow("Call of Duty: Black Ops", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, w, h,
         SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN);
-    if (s_window)
-        ApplyAndroidDpuScaling(s_window, w, h);
 #else
     if (const char *fixed = SDL_getenv("BO1_WINDOW_SIZE"))
     {
@@ -383,14 +326,6 @@ extern "C" void bo1_native_video_vulkan_close(void)
 extern "C" void bo1_native_video_drawable_size(int *width, int *height)
 {
     *width = *height = 0;
-#ifdef __ANDROID__
-    if (s_dpuBufW > 0 && s_dpuBufH > 0)
-    {
-        *width = s_dpuBufW;
-        *height = s_dpuBufH;
-        return;
-    }
-#endif
     if (s_window)
         SDL_Vulkan_GetDrawableSize(s_window, width, height);
 }
