@@ -547,19 +547,15 @@ void __cdecl RB_HW_BeginOcclusionQuery(IDirect3DQuery9 *query)
 unsigned int __cdecl RB_HW_ReadOcclusionQuery(IDirect3DQuery9 *query)
 {
     HRESULT hr; // [esp+4h] [ebp-8h]
-    unsigned int pixelCount; // [esp+8h] [ebp-4h] BYREF
+    unsigned int pixelCount = 0; // [esp+8h] [ebp-4h] BYREF
 
-    while ( 1 )
-    {
-        hr = query->GetData(&pixelCount, 4, D3DGETDATA_FLUSH);
-        if ( hr != 1 )
-            break;
-        Sleep(0);
-    }
-    if ( hr >= 0 )
+    // Non-blocking poll (no D3DGETDATA_FLUSH, no busy-spin): prevents mid-frame Vulkan command-buffer
+    // flushes and mobile tiled-GPU GMEM stalls when looking at rooms with multiple lights/coronas.
+    // Callers preserve the previous frame's smooth flare visibility whenever (unsigned int)-1 is returned.
+    hr = query->GetData(&pixelCount, 4, 0);
+    if ( hr == 0 )
         return pixelCount;
-    else
-        return -1;
+    return (unsigned int)-1;
 }
 
 void __cdecl RB_ResetCoronas()

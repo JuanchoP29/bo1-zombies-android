@@ -4137,14 +4137,6 @@ void __fastcall Actor_HandleInvalidPath(actor_s *self)
     if ( !self->useMeleeAttackSpot )
     {
         Actor_TeamMoveBlocked(self);
-        Com_Printf(
-            18,
-            "%sAI (entity %d, origin %.1f %.1f %.1f) couldn't find path to goal.\n",
-            "^1",
-            self->ent->s.number,
-            self->ent->r.currentOrigin[0],
-            self->ent->r.currentOrigin[1],
-            self->ent->r.currentOrigin[2]);
         if ( !self->ent
             && !Assert_MyHandler("C:\\projects_pc\\cod\\codsrc\\src\\game_mp\\actor_mp.cpp", 3630, 0, "%s", "self->ent") )
         {

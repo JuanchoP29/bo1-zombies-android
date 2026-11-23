@@ -671,8 +671,6 @@ char __cdecl SV_GetClientPositionsAtTime(int gametime, float (*pos)[3], float (*
             endOffset = 50 * (--snapOffset + rewindDeltaTime / 50);
             frameEnd = SV_GetCachedSnapshot(&endOffset);
         }
-        if ( frameEnd && snapOffset != 1 )
-            Com_Printf(15, "Adjusted frameEnd by %i snaps\n", 1 - snapOffset);
         snapOffset = 2;
         while ( frameStart && frameStart->time > gametime )
         {
@@ -680,8 +678,6 @@ char __cdecl SV_GetClientPositionsAtTime(int gametime, float (*pos)[3], float (*
             startOffset = 50 * (++snapOffset + rewindDeltaTime / 50);
             frameStart = SV_GetCachedSnapshot(&startOffset);
         }
-        if ( frameStart && snapOffset != 2 )
-            Com_Printf(15, "Adjusted frameStart by %i snaps\n", snapOffset - 2);
         foundStart = frameStart != 0;
         foundEnd = frameEnd != 0;
         memset(startSuccess, 0, sizeof(startSuccess));

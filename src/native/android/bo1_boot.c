@@ -399,7 +399,7 @@ int SDL_main(int argc, char **argv)
     if (chdir(game) != 0)
         Say("chdir(%s): %s", game, strerror(errno));
 
-    char *engineArgv[96];
+    char *engineArgv[192];
     int engineArgc = 0;
     engineArgv[engineArgc++] = (char *)"bo1";
     engineArgv[engineArgc++] = (char *)"+set";
@@ -414,7 +414,7 @@ int SDL_main(int argc, char **argv)
     engineArgv[engineArgc++] = (char *)"0";
     // (from the activity: --rates=<the display's refresh rates>, Bo1Activity.getArguments; --refresh= is from
     // versions before 0.5-turnip and is not an engine argument)
-    for (int i = 1; i < argc && engineArgc < 95; ++i)
+    for (int i = 1; i < argc && engineArgc < 191; ++i)
     {
         if (!strncmp(argv[i], "--refresh=", 10))
             continue;
@@ -453,7 +453,7 @@ int SDL_main(int argc, char **argv)
     }
     else
         snprintf(extra, sizeof(extra), "+set bo1_zombies 1");
-    engineArgc = SplitArguments(extra, engineArgv, engineArgc, 96);
+    engineArgc = SplitArguments(extra, engineArgv, engineArgc, 192);
     engineArgv[engineArgc] = NULL;
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");   // back is Escape for the engine, not "leave the app"
     // The display, for the engine's list of video modes (native_video.cpp reads these): its size, landscape, and

@@ -12,9 +12,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 #ifdef __ANDROID__
+#include <dirent.h>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <sys/resource.h>
@@ -169,6 +171,126 @@ int64_t s_frameStartNs = 0;
 int s_adpfDefaultFps = 0;
 int s_adpfFramesWithoutSession = 0;
 
+// Universal ARM64 hybrid CPU topology (Big/Prime vs LITTLE) + DXVK background shader demotion.
+// Prevents background dxvk-shader-* threads (which inherit nice -4 from RB_RenderThread) from
+// stealing Big/Prime cores during gameplay on Snapdragon, MediaTek, Exynos, and Tensor SoCs.
+bool s_topoInit = false;
+bool s_hasHybrid = false;
+int s_fastCount = 0;
+int s_bgCount = 0;
+cpu_set_t s_fastMask;
+cpu_set_t s_bgMask;
+int s_tuneFrameCount = 0;
+int s_tuneScansDone = 0;
+bool s_tuneLogged = false;
+
+void DetectCoreTopologyLocked()
+{
+    if (s_topoInit)
+        return;
+    s_topoInit = true;
+    CPU_ZERO(&s_fastMask);
+    CPU_ZERO(&s_bgMask);
+
+    long caps[16];
+    int online = 0;
+    long minCap = 0, maxCap = 0;
+    for (int c = 0; c < 16; ++c)
+    {
+        caps[c] = -1;
+        char path[96], line[64];
+        snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpu_capacity", c);
+        long val = -1;
+        if (ReadLine(path, line, sizeof(line)))
+            val = atol(line);
+        if (val <= 0)
+        {
+            snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", c);
+            if (ReadLine(path, line, sizeof(line)))
+                val = atol(line);
+        }
+        if (val > 0)
+        {
+            caps[c] = val;
+            if (online == 0 || val < minCap)
+                minCap = val;
+            if (online == 0 || val > maxCap)
+                maxCap = val;
+            ++online;
+        }
+    }
+    if (online >= 4 && maxCap > minCap)
+    {
+        for (int c = 0; c < 16; ++c)
+        {
+            if (caps[c] <= 0)
+                continue;
+            if (caps[c] > minCap)
+            {
+                CPU_SET(c, &s_fastMask);
+                ++s_fastCount;
+            }
+            else
+            {
+                CPU_SET(c, &s_bgMask);
+                ++s_bgCount;
+            }
+        }
+        if (s_fastCount >= 2 && s_bgCount >= 2)
+            s_hasHybrid = true;
+    }
+}
+
+void TuneProcessThreadsLocked()
+{
+    DetectCoreTopologyLocked();
+    DIR *dir = opendir("/proc/self/task");
+    if (!dir)
+        return;
+    int shaderTuned = 0;
+    int hotTuned = 0;
+    while (dirent *ent = readdir(dir))
+    {
+        if (ent->d_name[0] < '0' || ent->d_name[0] > '9')
+            continue;
+        const pid_t tid = (pid_t)atoi(ent->d_name);
+        if (tid <= 0)
+            continue;
+        char commPath[96], comm[64];
+        snprintf(commPath, sizeof(commPath), "/proc/self/task/%d/comm", (int)tid);
+        if (!ReadLine(commPath, comm, sizeof(comm)))
+            continue;
+        size_t len = strlen(comm);
+        while (len > 0 && (comm[len - 1] == '\n' || comm[len - 1] == '\r'))
+            comm[--len] = 0;
+
+        if (strncmp(comm, "dxvk-shader", 11) == 0)
+        {
+            // Demote background Vulkan shader compilers so they never preempt gameplay/render frames.
+            setpriority(PRIO_PROCESS, (id_t)tid, 8);
+            if (s_hasHybrid && s_bgCount >= 2)
+                sched_setaffinity(tid, sizeof(cpu_set_t), &s_bgMask);
+            ++shaderTuned;
+        }
+        else if (strcmp(comm, "dxvk-cs") == 0 || strcmp(comm, "dxvk-submit") == 0
+            || strcmp(comm, "dxvk-queue") == 0 || strcmp(comm, "Server") == 0)
+        {
+            setpriority(PRIO_PROCESS, (id_t)tid, -4);
+            if (s_hasHybrid && s_fastCount >= 3)
+                sched_setaffinity(tid, sizeof(cpu_set_t), &s_fastMask);
+            ++hotTuned;
+        }
+    }
+    closedir(dir);
+    if ((shaderTuned > 0 || hotTuned > 0) && !s_tuneLogged)
+    {
+        s_tuneLogged = true;
+        fprintf(stderr, "native: scheduler tuned (hybrid=%d fast=%d bg=%d, shader=%d -> nice +8, hot=%d -> nice -4)\n",
+            s_hasHybrid ? 1 : 0, s_fastCount, s_bgCount, shaderTuned, hotTuned);
+        fflush(stderr);
+    }
+}
+
 int AdpfDefaultFps()
 {
     if (s_adpfDefaultFps > 0)
@@ -287,6 +409,9 @@ extern "C" void bo1_native_perf_register_thread(int role)
     setpriority(PRIO_PROCESS, 0, -4);
     const int32_t tid = (int32_t)gettid();
     pthread_mutex_lock(&s_adpfMutex);
+    DetectCoreTopologyLocked();
+    if (s_hasHybrid && s_fastCount >= 3)
+        sched_setaffinity(0, sizeof(cpu_set_t), &s_fastMask);
     if (s_adpfTids[role] != tid)
     {
         s_adpfTids[role] = tid;
@@ -303,6 +428,14 @@ extern "C" void bo1_native_perf_frame_begin(void)
 
 extern "C" void bo1_native_perf_frame_end(int targetFps)
 {
+    ++s_tuneFrameCount;
+    if (s_tuneScansDone < 4 && (s_tuneFrameCount == 30 || s_tuneFrameCount == 180 || s_tuneFrameCount == 480 || s_tuneFrameCount == 900))
+    {
+        ++s_tuneScansDone;
+        pthread_mutex_lock(&s_adpfMutex);
+        TuneProcessThreadsLocked();
+        pthread_mutex_unlock(&s_adpfMutex);
+    }
     if (!s_adpfSession && s_adpfMgr && !s_adpfCreateLogged && ++s_adpfFramesWithoutSession == 60)
     {
         pthread_mutex_lock(&s_adpfMutex);

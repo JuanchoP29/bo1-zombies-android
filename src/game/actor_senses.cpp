@@ -580,12 +580,6 @@ void __fastcall Actor_UpdateEyeInformation(actor_s *self)
         }
         else
         {
-            if ( Com_GetServerDObj(self->ent->s.number) )
-            {
-                ServerDObj = Com_GetServerDObj(self->ent->s.number);
-                Name = DObjGetName(ServerDObj);
-                Com_Printf(18, "Actor_UpdateEyeInformation: Actor dobj doesn't have TAG_EYE.(%s)\n", Name);
-            }
             currentOrigin = self->ent->r.currentOrigin;
             self->eyeInfo.pos[0] = *currentOrigin;
             self->eyeInfo.pos[1] = currentOrigin[1];

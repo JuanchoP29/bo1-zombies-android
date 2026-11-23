@@ -121,28 +121,31 @@ void __cdecl RB_DrawSuperFlareOccluders(const GfxViewInfo *viewInfo)
                         {
                             PossiblePixelCount = RB_HW_ReadOcclusionQuery(SuperFlareQuery[iFrame][0][viewInfo->localClientNum][iPass]);
                             VisiblePixelCount = RB_HW_ReadOcclusionQuery(SuperFlareQuery[iFrame][1][viewInfo->localClientNum][iPass]);
-                            if ( PossiblePixelCount )
-                                Error = VisiblePixelCount > PossiblePixelCount;
-                            else
-                                Error = 1;
-                            if ( Error )
+                            if ( PossiblePixelCount != (unsigned int)-1 && VisiblePixelCount != (unsigned int)-1 )
                             {
-                                v4 = 0.0f;
-                            }
-                            else
-                            {
-                                v5 = (double)VisiblePixelCount / (double)PossiblePixelCount;
-                                if ( (float)(v5 - 1.0) < 0.0 )
-                                    v6 = (double)VisiblePixelCount / (double)PossiblePixelCount;
+                                if ( PossiblePixelCount )
+                                    Error = VisiblePixelCount > PossiblePixelCount;
                                 else
-                                    v6 = 1.0f;
-                                if ( (float)(0.0 - v5) < 0.0 )
-                                    v3 = v6;
+                                    Error = 1;
+                                if ( Error )
+                                {
+                                    v4 = 0.0f;
+                                }
                                 else
-                                    v3 = 0.0f;
-                                v4 = v3;
+                                {
+                                    v5 = (double)VisiblePixelCount / (double)PossiblePixelCount;
+                                    if ( (float)(v5 - 1.0) < 0.0 )
+                                        v6 = (double)VisiblePixelCount / (double)PossiblePixelCount;
+                                    else
+                                        v6 = 1.0f;
+                                    if ( (float)(0.0 - v5) < 0.0 )
+                                        v3 = v6;
+                                    else
+                                        v3 = 0.0f;
+                                    v4 = v3;
+                                }
+                                FilterInfo->passFlareOcclusion[iFilter][iPass] = v4;
                             }
-                            FilterInfo->passFlareOcclusion[iFilter][iPass] = v4;
                         }
                         else
                         {

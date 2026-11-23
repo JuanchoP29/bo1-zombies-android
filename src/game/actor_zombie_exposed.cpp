@@ -135,9 +135,6 @@ static void Actor_UpdateEyeInformation_SP(actor_s *self)
             self->eyeInfo.dir[2] = 0.0f;
             return;
         }
-        if ( Com_GetServerDObj(self->ent->s.number) )
-            Com_Printf(18, "Actor_UpdateEyeInformation: Actor dobj doesn't have TAG_EYE.(%s)\n",
-                DObjGetName(Com_GetServerDObj(self->ent->s.number)));
     }
     Vec3Copy(self->ent->r.currentOrigin, self->eyeInfo.pos);
     self->eyeInfo.pos[2] += 64.0f;

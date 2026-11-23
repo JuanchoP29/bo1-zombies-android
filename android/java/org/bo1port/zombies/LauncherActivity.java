@@ -84,6 +84,7 @@ public class LauncherActivity extends Activity {
     // Settings state
     private int modeZombies = 1;       // 1 = Zombies, 0 = Multiplayer
     private int renderer = 1;          // 1 = Vulkan, 0 = OpenGL ES
+    private int gfxProfile = 0;        // 0=Mobile Optimized (Recommended), 1=High / PC Original, 2=Low / Max FPS
     private int resIndex = 0;          // 0=Keep, 1=1200x540, 2=1600x720, 3=1800x810, 4=2000x900, 5=Native
     private int fpsIndex = 0;          // 0=60, 1=90, 2=120, 3=Unlimited
     private int vsync = 0;             // 0=Off, 1=On
@@ -132,6 +133,7 @@ public class LauncherActivity extends Activity {
     private void loadSettings() {
         modeZombies = prefs.getInt("modeZombies", 1);
         renderer = prefs.getInt("renderer", 1);
+        gfxProfile = prefs.getInt("gfxProfile", 0);
         resIndex = prefs.getInt("resIndex", 0);
         fpsIndex = prefs.getInt("fpsIndex", 0);
         vsync = prefs.getInt("vsync", 0);
@@ -154,6 +156,7 @@ public class LauncherActivity extends Activity {
         prefs.edit()
                 .putInt("modeZombies", modeZombies)
                 .putInt("renderer", renderer)
+                .putInt("gfxProfile", gfxProfile)
                 .putInt("resIndex", resIndex)
                 .putInt("fpsIndex", fpsIndex)
                 .putInt("vsync", vsync)
@@ -853,6 +856,15 @@ public class LauncherActivity extends Activity {
                     }
                 });
 
+        addSpinnerRow(card, "Perfil gráfico", new String[] {
+                "Móvil Optimizado (Recomendado)", "Alto / PC Original", "Gama Baja / Máximo FPS"
+        }, gfxProfile, new IntConsumer() {
+            @Override
+            public void accept(int v) {
+                gfxProfile = v;
+            }
+        });
+
         addSpinnerRow(card, "Resolución", new String[] {
                 "Mantener actual", "1200x540 (Rendimiento)", "1600x720 (720p)",
                 "1800x810 (75% Pro)", "2000x900 (900p)", "Nativa del panel"
@@ -1058,6 +1070,15 @@ public class LauncherActivity extends Activity {
         args.append(String.format(Locale.US, " +set gpad_stick_deadzone_min %.2f", padDeadzonePct * 0.01f));
         args.append(" +set gpad_rumble ").append(padRumble == 0 ? 0 : 1);
 
+        // Apply universal mobile graphics profile to config.cfg (avoids inflating sys_cmdline 1024-byte limit)
+        // and pass the highest-impact flags for first-time installs before config.cfg exists.
+        applyGfxProfileToConfigs(gfxProfile);
+        if (gfxProfile == 1) {
+            args.append(" +set r_depthPrepass 0 +set r_multiGpu 0");
+        } else {
+            args.append(" +set r_depthPrepass 0 +set r_multiGpu 0 +set r_zfeather 0 +set r_distortion 0");
+        }
+
         String mode = getSelectedResolution();
         if (mode != null) {
             args.append(" +set r_mode ").append(mode);
@@ -1074,6 +1095,104 @@ public class LauncherActivity extends Activity {
         Intent intent = new Intent(this, Bo1Activity.class);
         startActivity(intent);
         finish();
+    }
+
+    private void applyGfxProfileToConfigs(int profile) {
+        String[][] pairs;
+        if (profile == 1) {
+            // High / PC Original (still keeps r_depthPrepass 0 and r_multiGpu 0 for mobile tiled GPUs)
+            pairs = new String[][] {
+                    { "r_depthPrepass", "0" },
+                    { "r_aaAlpha", "dither (fast)" },
+                    { "r_aaSamples", "1" },
+                    { "r_texFilterAnisoMin", "4" },
+                    { "r_texFilterAnisoMax", "8" },
+                    { "r_zfeather", "1" },
+                    { "r_distortion", "1" },
+                    { "r_dof_enable", "1" },
+                    { "r_multiGpu", "0" },
+                    { "sm_maxLights", "4" },
+                    { "r_gfxopt_dynamic_foliage", "1" },
+                    { "r_picmip", "0" },
+                    { "r_picmip_bump", "0" },
+                    { "r_picmip_spec", "0" },
+            };
+        } else if (profile == 2) {
+            // Low / Max FPS (best for entry-level Mali / Helio GPUs or chasing 120 FPS)
+            pairs = new String[][] {
+                    { "r_depthPrepass", "0" },
+                    { "r_aaAlpha", "off" },
+                    { "r_aaSamples", "1" },
+                    { "r_texFilterAnisoMin", "1" },
+                    { "r_texFilterAnisoMax", "2" },
+                    { "r_zfeather", "0" },
+                    { "r_distortion", "0" },
+                    { "r_dof_enable", "0" },
+                    { "r_multiGpu", "0" },
+                    { "sm_maxLights", "1" },
+                    { "r_gfxopt_dynamic_foliage", "0" },
+                    { "r_picmip", "1" },
+                    { "r_picmip_bump", "1" },
+                    { "r_picmip_spec", "1" },
+            };
+        } else {
+            // 0 = Mobile Optimized (Recommended): full crisp textures & lighting, zero wasted mobile GPU passes
+            pairs = new String[][] {
+                    { "r_depthPrepass", "0" },
+                    { "r_aaAlpha", "off" },
+                    { "r_aaSamples", "1" },
+                    { "r_texFilterAnisoMin", "1" },
+                    { "r_texFilterAnisoMax", "4" },
+                    { "r_zfeather", "0" },
+                    { "r_distortion", "0" },
+                    { "r_dof_enable", "0" },
+                    { "r_multiGpu", "0" },
+                    { "sm_maxLights", "2" },
+                    { "r_gfxopt_dynamic_foliage", "0" },
+                    { "r_picmip", "0" },
+                    { "r_picmip_bump", "0" },
+                    { "r_picmip_spec", "0" },
+            };
+        }
+
+        File playersDir = new File(new File(filesDir, "home"), "players");
+        updateCfgKeys(new File(playersDir, "config.cfg"), pairs);
+        updateCfgKeys(new File(playersDir, "config_mp.cfg"), pairs);
+    }
+
+    private void updateCfgKeys(File cfgFile, String[][] pairs) {
+        if (!cfgFile.isFile()) {
+            return;
+        }
+        String content = readSmallFile(cfgFile);
+        if (content == null || content.isEmpty()) {
+            return;
+        }
+        String[] lines = content.split("\r?\n");
+        boolean[] seen = new boolean[pairs.length];
+        StringBuilder out = new StringBuilder(content.length() + 256);
+        for (String line : lines) {
+            String trimmed = line.trim();
+            boolean replaced = false;
+            for (int i = 0; i < pairs.length; i++) {
+                String prefix = "seta " + pairs[i][0] + " ";
+                if (trimmed.startsWith(prefix)) {
+                    out.append(prefix).append('"').append(pairs[i][1]).append('"').append('\n');
+                    seen[i] = true;
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                out.append(line).append('\n');
+            }
+        }
+        for (int i = 0; i < pairs.length; i++) {
+            if (!seen[i]) {
+                out.append("seta ").append(pairs[i][0]).append(" \"").append(pairs[i][1]).append("\"\n");
+            }
+        }
+        writeSmallFile(cfgFile, out.toString());
     }
 
     @Override

@@ -236,9 +236,9 @@ extern "C" int bo1vk_available(void)
             compilerThreads = 2;
         else if (compilerThreads > 4)
             compilerThreads = 4;
-        char dxvkCfg[256];
+        char dxvkCfg[320];
         snprintf(dxvkCfg, sizeof(dxvkCfg),
-            "d3d9.maxFrameLatency = 2; d3d9.lenientClear = True; d3d9.deferSurfaceCreation = True; dxvk.numCompilerThreads = %d;",
+            "d3d9.maxFrameLatency = 2; d3d9.lenientClear = True; d3d9.deferSurfaceCreation = True; d3d9.floatEmulation = False; dxvk.numCompilerThreads = %d;",
             compilerThreads);
         setenv("DXVK_CONFIG", dxvkCfg, 0);
     }

@@ -173,11 +173,7 @@ centity_s *__cdecl CG_Spawn(unsigned int localClientNum)
             CG_UpdatePoseUnion(localClientNum, &cent->cent);
             R_InitShaderConstantSet(&cent->cent.pose.constantSet);
             if ( i + 1 > s_fakePeak )
-            {
                 s_fakePeak = i + 1;
-                if ( s_fakePeak > 64 )
-                    Com_Printf(14, "BO1_FAKEENTS peak %d of %d\n", s_fakePeak, g_entNumCscEnd - MAX_GENTITIES);
-            }
             return &cent->cent;
         }
     }
