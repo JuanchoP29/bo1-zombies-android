@@ -578,7 +578,18 @@ static int EngineMain(int argc, bo1_host_str *argv)
     for (int i = 1; i < argc; ++i)
     {
         cmdline += ' ';
-        cmdline += argv[i];
+        const char *arg = argv[i];
+        const bool needsQuotes = arg && arg[0] != '"' && (strchr(arg, ' ') != nullptr || strchr(arg, '\t') != nullptr);
+        if (needsQuotes)
+        {
+            cmdline += '"';
+            cmdline += arg;
+            cmdline += '"';
+        }
+        else
+        {
+            cmdline += arg;
+        }
     }
     std::string game = ArgValue(argc, argv, "fs_b");
     if (game.empty())

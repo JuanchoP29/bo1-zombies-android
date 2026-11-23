@@ -8,8 +8,8 @@
      No largeHeap: the Java heap's reservation is below 4 GB, where the engine needs the room. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.bo1port.zombies.turnip"
-    android:versionCode="26"
-    android:versionName="0.5-turnip-custom21"
+    android:versionCode="27"
+    android:versionName="0.5-turnip-custom22"
     android:installLocation="auto">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
@@ -37,6 +37,7 @@
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
 
         <meta-data android:name="SDL_ENV.SDL_ACCELEROMETER_AS_JOYSTICK" android:value="0" />
+        <meta-data android:name="android.game_mode_config" android:resource="@xml/game_mode_config" />
 
         <activity
             android:name="org.bo1port.zombies.LauncherActivity"

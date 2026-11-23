@@ -73,7 +73,31 @@ extern "C" int bo1_native_gpu_percent(void)
     {
         long busy = 0, total = 0;
         if (sscanf(line, "%ld %ld", &busy, &total) == 2 && total > 0)
-            return (int)(busy * 100 / total);
+        {
+            // Some Adreno kernels (e.g. Honor/Snapdragon 7 Gen 3) expose cumulative ticks since boot
+            // rather than per-interval samples; compute the delta between calls so GPU % is live.
+            static long s_lastBusy = -1, s_lastTotal = -1;
+            static int s_lastPct = 0;
+            if (s_lastTotal >= 0 && total > s_lastTotal && busy >= s_lastBusy)
+            {
+                const long dBusy = busy - s_lastBusy;
+                const long dTotal = total - s_lastTotal;
+                int pct = (int)(dBusy * 100 / dTotal);
+                if (pct < 0) pct = 0;
+                if (pct > 100) pct = 100;
+                s_lastPct = pct;
+                s_lastBusy = busy;
+                s_lastTotal = total;
+                return s_lastPct;
+            }
+            if (s_lastTotal < 0 || total < s_lastTotal)
+            {
+                s_lastBusy = busy;
+                s_lastTotal = total;
+                s_lastPct = (int)(busy * 100 / total);
+            }
+            return s_lastPct;
+        }
         return 0;
     }
     if (ReadLine("/sys/class/misc/mali0/device/utilization", line, sizeof(line)))

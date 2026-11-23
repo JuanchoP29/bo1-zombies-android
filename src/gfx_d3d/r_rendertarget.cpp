@@ -149,6 +149,10 @@ void R_InitRenderTargets_PC()
             if (vidConfig.displayWidth <= 0x400)
                 dx.sunShadowmapSize = 512;
         }
+#ifdef __ANDROID__
+        if (sm_qualitySpotShadow && !sm_qualitySpotShadow->current.enabled)
+            dx.sunShadowmapSize = 512;
+#endif
         R_InitShadowmapRenderTarget(0, dx.sunShadowmapSize, 2u, &gfxRenderTargets[R_RENDERTARGET_SHADOWMAP_SUN], SHADOWMAP_RT_TILE_VERTICAL);
         R_InitShadowmapRenderTarget(1, 0x200u, 4u, &gfxRenderTargets[R_RENDERTARGET_SHADOWMAP_SPOT], SHADOWMAP_RT_TILE_VERTICAL);
         R_InitFullscreenRenderTargetImage(

@@ -1112,6 +1112,7 @@ public class LauncherActivity extends Activity {
                     { "r_dof_enable", "1" },
                     { "r_multiGpu", "0" },
                     { "sm_maxLights", "4" },
+                    { "sm_qualitySpotShadow", "1" },
                     { "r_gfxopt_dynamic_foliage", "1" },
                     { "r_picmip", "0" },
                     { "r_picmip_bump", "0" },
@@ -1130,13 +1131,14 @@ public class LauncherActivity extends Activity {
                     { "r_dof_enable", "0" },
                     { "r_multiGpu", "0" },
                     { "sm_maxLights", "1" },
+                    { "sm_qualitySpotShadow", "0" },
                     { "r_gfxopt_dynamic_foliage", "0" },
                     { "r_picmip", "1" },
                     { "r_picmip_bump", "1" },
                     { "r_picmip_spec", "1" },
             };
         } else {
-            // 0 = Mobile Optimized (Recommended): full crisp textures & lighting, zero wasted mobile GPU passes
+            // 0 = Mobile Optimized (Recommended): full crisp textures & lighting, lightweight 512p shadows
             pairs = new String[][] {
                     { "r_depthPrepass", "0" },
                     { "r_aaAlpha", "off" },
@@ -1147,7 +1149,8 @@ public class LauncherActivity extends Activity {
                     { "r_distortion", "0" },
                     { "r_dof_enable", "0" },
                     { "r_multiGpu", "0" },
-                    { "sm_maxLights", "2" },
+                    { "sm_maxLights", "1" },
+                    { "sm_qualitySpotShadow", "0" },
                     { "r_gfxopt_dynamic_foliage", "0" },
                     { "r_picmip", "0" },
                     { "r_picmip_bump", "0" },
