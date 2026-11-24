@@ -5,6 +5,8 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CombinedVibration;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
@@ -160,6 +162,14 @@ public class Bo1Activity extends SDLActivity {
         if (BypassChargingHelper.isActive()) {
             BypassChargingHelper.restore();
         }
+        if (rumbleHandler != null) {
+            rumbleHandler.removeCallbacksAndMessages(null);
+            rumbleHandler = null;
+        }
+        if (rumbleThread != null) {
+            rumbleThread.quitSafely();
+            rumbleThread = null;
+        }
         super.onDestroy();
     }
 
@@ -187,109 +197,192 @@ public class Bo1Activity extends SDLActivity {
     }
 
     private boolean rumbleLogged;
-    private int padRumbleMode = 1; // 0=Off, 1=Safe BT (single-motor 160ms/200ms, no cancel spam), 2=Full USB
+    private int padRumbleMode = 1; // 0=Off, 1=Safe BT (single-motor 80ms/360ms, 280ms quiet gap), 2=Full USB
     private long lastRumbleAtMs = 0L;
+    private HandlerThread rumbleThread;
+    private Handler rumbleHandler;
+    private int cachedRumbleDevId = -1;
+    private long lastRumbleScanAtMs = 0L;
+
+    private synchronized Handler ensureRumbleHandler() {
+        if (rumbleHandler == null) {
+            rumbleThread = new HandlerThread("BO1Rumble");
+            rumbleThread.start();
+            rumbleHandler = new Handler(rumbleThread.getLooper());
+        }
+        return rumbleHandler;
+    }
+
+    private static boolean isGamepadOrExternalVibrator(InputDevice dev, boolean allowNonGamepadExternal) {
+        if (dev == null || dev.isVirtual()) {
+            return false;
+        }
+        int src = dev.getSources();
+        boolean isPad = ((src & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD)
+                || ((src & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK);
+        if (isPad) {
+            return true;
+        }
+        return allowNonGamepadExternal && dev.isExternal() && dev.getVendorId() != 0
+                && (src & InputDevice.SOURCE_TOUCHSCREEN) == 0;
+    }
+
+    private InputDevice resolveRumbleDevice(long nowMs) {
+        if (cachedRumbleDevId >= 0) {
+            InputDevice cached = InputDevice.getDevice(cachedRumbleDevId);
+            if (isGamepadOrExternalVibrator(cached, true)) {
+                return cached;
+            }
+            cachedRumbleDevId = -1;
+            rumbleLogged = false;
+        }
+        if ((nowMs - lastRumbleScanAtMs) < 500L) {
+            return null;
+        }
+        lastRumbleScanAtMs = nowMs;
+        int[] devIds = InputDevice.getDeviceIds();
+        for (int pass = 0; pass < 2; pass++) {
+            boolean allowNonGamepad = (pass == 1);
+            for (int devId : devIds) {
+                InputDevice dev = InputDevice.getDevice(devId);
+                if (!isGamepadOrExternalVibrator(dev, allowNonGamepad)) {
+                    continue;
+                }
+                if (Build.VERSION.SDK_INT >= 31) {
+                    VibratorManager vm = dev.getVibratorManager();
+                    if (vm != null) {
+                        int[] vibIds = vm.getVibratorIds();
+                        if (vibIds != null && vibIds.length > 0) {
+                            cachedRumbleDevId = devId;
+                            return dev;
+                        }
+                    }
+                }
+                @SuppressWarnings("deprecation")
+                Vibrator vib = dev.getVibrator();
+                if (vib != null && vib.hasVibrator()) {
+                    cachedRumbleDevId = devId;
+                    return dev;
+                }
+            }
+        }
+        if (!rumbleLogged) {
+            rumbleLogged = true;
+            Log.w("BO1Rumble", "No controller vibrator found among " + devIds.length + " input devices");
+        }
+        return null;
+    }
 
     /**
-     * Native Android gamepad rumble.
+     * Native Android gamepad rumble (dispatched asynchronously off the game thread).
      * Mode 0: completely disabled (0 Bluetooth HID output packets ever).
-     * Mode 1 (Safe BT): single-motor 160 ms finite pulse, 200 ms cooldown, capped amplitude (180),
-     *   and NO cancel() HID spam so Xiaomi MiuiBluetooth / DualShock 4 never hits HID_HostWriteDev status:8.
-     * Mode 2 (Full USB): dual-motor rumble with 120 ms cooldown.
+     * Mode 1 (Safe BT): single-motor 80 ms finite pulse, 360 ms minimum interval (280 ms guaranteed quiet gap
+     *   after auto-stop), capped amplitude (160), and NO cancel() HID spam so BT HID stacks never hit status:8.
+     * Mode 2 (Full USB): dual-motor 140 ms pulse, 220 ms interval (80 ms quiet gap, never overlaps).
      */
     public void setControllerRumble(String spec) {
         try {
-            if (padRumbleMode == 0 || spec == null) {
+            final int mode = padRumbleMode;
+            if (mode == 0 || spec == null) {
                 return;
             }
             String[] parts = spec.trim().split("\\s+");
             if (parts.length < 2) {
                 return;
             }
-            int low = Math.max(0, Math.min(255, Integer.parseInt(parts[0])));
-            int high = Math.max(0, Math.min(255, Integer.parseInt(parts[1])));
-
-            long now = SystemClock.uptimeMillis();
-            boolean stopping = (low == 0 && high == 0);
-            if (stopping && padRumbleMode == 1) {
-                // In Safe BT mode, short 160 ms pulses stop automatically; skip redundant HID cancel packets.
+            final int low = Math.max(0, Math.min(255, Integer.parseInt(parts[0])));
+            final int high = Math.max(0, Math.min(255, Integer.parseInt(parts[1])));
+            final boolean stopping = (low == 0 && high == 0);
+            if (stopping && mode == 1) {
+                // In Safe BT mode, short 80 ms pulses stop automatically; skip redundant HID cancel packets.
                 return;
             }
-            long cooldown = (padRumbleMode == 1) ? 200L : 120L;
-            if (!stopping && (now - lastRumbleAtMs) < cooldown) {
+            if (!stopping && Math.max(low, high) < 24) {
+                return;
+            }
+
+            final long now = SystemClock.uptimeMillis();
+            final long minIntervalMs = (mode == 1) ? 360L : 220L;
+            if (!stopping && (now - lastRumbleAtMs) < minIntervalMs) {
                 return;
             }
             lastRumbleAtMs = now;
 
-            int[] devIds = InputDevice.getDeviceIds();
-            // Pass 0: standard gamepad/joystick InputDevice; Pass 1: any external non-virtual device with a vibrator
-            for (int pass = 0; pass < 2; pass++) {
-                for (int devId : devIds) {
-                    InputDevice dev = InputDevice.getDevice(devId);
-                    if (dev == null || dev.isVirtual()) {
-                        continue;
-                    }
-                    int src = dev.getSources();
-                    boolean isPad = ((src & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD)
-                            || ((src & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK);
-                    if (pass == 0 ? !isPad : (isPad || dev.getVendorId() == 0)) {
-                        continue;
-                    }
-                    if (Build.VERSION.SDK_INT >= 31) {
-                        VibratorManager vm = dev.getVibratorManager();
-                        if (vm != null) {
-                            int[] vibIds = vm.getVibratorIds();
-                            if (vibIds != null && vibIds.length > 0) {
-                                if (!rumbleLogged && !stopping) {
-                                    rumbleLogged = true;
-                                    Log.i("BO1Rumble", "VibratorManager on '" + dev.getName()
-                                            + "' mode=" + padRumbleMode + " motors=" + vibIds.length);
-                                }
-                                if (stopping) {
-                                    vm.cancel();
-                                } else if (padRumbleMode == 2 && vibIds.length >= 2) {
-                                    CombinedVibration.ParallelCombination combo = CombinedVibration.startParallel();
-                                    if (low > 0) {
-                                        combo.addVibrator(vibIds[0], VibrationEffect.createOneShot(240, low));
-                                    }
-                                    if (high > 0) {
-                                        combo.addVibrator(vibIds[1], VibrationEffect.createOneShot(240, high));
-                                    }
-                                    vm.vibrate(combo.combine());
-                                } else {
-                                    // Safe BT: single motor only (1 HID write instead of 2) + gentle cap (180) + 160 ms pulse
-                                    int amp = Math.max(1, Math.min(padRumbleMode == 1 ? 180 : 255, Math.max(low, high)));
-                                    CombinedVibration single = CombinedVibration.startParallel()
-                                            .addVibrator(vibIds[0], VibrationEffect.createOneShot(160, amp))
-                                            .combine();
-                                    vm.vibrate(single);
-                                }
-                                return;
-                            }
-                        }
-                    }
-                    @SuppressWarnings("deprecation")
-                    Vibrator vib = dev.getVibrator();
-                    if (vib != null && vib.hasVibrator()) {
+            Handler h = ensureRumbleHandler();
+            h.removeCallbacksAndMessages(null);
+            h.post(new Runnable() {
+                @Override
+                public void run() {
+                    dispatchControllerRumble(low, high, stopping, mode, now);
+                }
+            });
+        } catch (Throwable t) {
+            if (!rumbleLogged) {
+                rumbleLogged = true;
+                Log.w("BO1Rumble", "Controller rumble parse error: " + t);
+            }
+        }
+    }
+
+    private void dispatchControllerRumble(int low, int high, boolean stopping, int mode, long nowMs) {
+        try {
+            InputDevice dev = resolveRumbleDevice(nowMs);
+            if (dev == null) {
+                return;
+            }
+            final int pulseMs = (mode == 1) ? 80 : 140;
+            final int maxAmp = (mode == 1) ? 160 : 255;
+
+            if (Build.VERSION.SDK_INT >= 31) {
+                VibratorManager vm = dev.getVibratorManager();
+                if (vm != null) {
+                    int[] vibIds = vm.getVibratorIds();
+                    if (vibIds != null && vibIds.length > 0) {
                         if (!rumbleLogged && !stopping) {
                             rumbleLogged = true;
-                            Log.i("BO1Rumble", "Legacy Vibrator on '" + dev.getName() + "' mode=" + padRumbleMode);
+                            Log.i("BO1Rumble", "VibratorManager on '" + dev.getName()
+                                    + "' mode=" + mode + " motors=" + vibIds.length);
                         }
-                        int amp = Math.max(0, Math.min(padRumbleMode == 1 ? 180 : 255, Math.max(low, high)));
-                        if (amp <= 0) {
-                            vib.cancel();
+                        if (stopping) {
+                            vm.cancel();
+                        } else if (mode == 2 && vibIds.length >= 2) {
+                            CombinedVibration.ParallelCombination combo = CombinedVibration.startParallel();
+                            if (low > 0) {
+                                combo.addVibrator(vibIds[0], VibrationEffect.createOneShot(pulseMs, Math.min(maxAmp, low)));
+                            }
+                            if (high > 0) {
+                                combo.addVibrator(vibIds[1], VibrationEffect.createOneShot(pulseMs, Math.min(maxAmp, high)));
+                            }
+                            vm.vibrate(combo.combine());
                         } else {
-                            vib.vibrate(VibrationEffect.createOneShot(160, amp));
+                            // Safe BT / single motor: 1 HID write only, preferring light motor for high-freq shots
+                            int targetMotor = (vibIds.length >= 2 && high > low) ? vibIds[1] : vibIds[0];
+                            int amp = Math.max(1, Math.min(maxAmp, Math.max(low, high)));
+                            CombinedVibration single = CombinedVibration.startParallel()
+                                    .addVibrator(targetMotor, VibrationEffect.createOneShot(pulseMs, amp))
+                                    .combine();
+                            vm.vibrate(single);
                         }
                         return;
                     }
                 }
             }
-            if (!rumbleLogged && (low > 0 || high > 0)) {
-                rumbleLogged = true;
-                Log.w("BO1Rumble", "No controller vibrator found among " + devIds.length + " input devices");
+            @SuppressWarnings("deprecation")
+            Vibrator vib = dev.getVibrator();
+            if (vib != null && vib.hasVibrator()) {
+                if (!rumbleLogged && !stopping) {
+                    rumbleLogged = true;
+                    Log.i("BO1Rumble", "Legacy Vibrator on '" + dev.getName() + "' mode=" + mode);
+                }
+                if (stopping) {
+                    vib.cancel();
+                } else {
+                    int amp = Math.max(1, Math.min(maxAmp, Math.max(low, high)));
+                    vib.vibrate(VibrationEffect.createOneShot(pulseMs, amp));
+                }
             }
         } catch (Throwable t) {
+            cachedRumbleDevId = -1;
             if (!rumbleLogged) {
                 rumbleLogged = true;
                 Log.w("BO1Rumble", "Controller rumble error: " + t);

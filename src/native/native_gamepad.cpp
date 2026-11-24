@@ -384,10 +384,11 @@ extern "C" void bo1_native_gamepad_update(void)
         else
         {
 #ifdef __ANDROID__
-            // Never let SDL2 HIDAPI emit raw Bluetooth 0x11 rumble packets on Android; Android rumble goes
+            // Never let SDL2 HIDAPI emit raw Bluetooth 0x11 rumble/LED packets on Android; Android rumble goes
             // exclusively through the rate-limited Bo1Activity bridge when gpad_rumble is enabled.
             SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS4_RUMBLE", "0");
             SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5_RUMBLE", "0");
+            SDL_SetHint("SDL_JOYSTICK_HIDAPI_SWITCH_HOME_LED", "0");
 #endif
             if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0)
             {
@@ -431,21 +432,32 @@ extern "C" void bo1_native_gamepad_update(void)
             const float low = pads[slot].rumble_low, high = pads[slot].rumble_high;
             if (low != s_rumbleLow[slot] || high != s_rumbleHigh[slot])
             {
-                s_rumbleLow[slot] = low;
-                s_rumbleHigh[slot] = high;
                 const float l = low < 0 ? 0 : low > 1 ? 1 : low, h = high < 0 ? 0 : high > 1 ? 1 : high;
 #ifndef __ANDROID__
+                s_rumbleLow[slot] = low;
+                s_rumbleHigh[slot] = high;
                 SDL_GameControllerRumble(c, (Uint16)(l * 65535.0f), (Uint16)(h * 65535.0f), l > 0 || h > 0 ? 5000 : 0);
 #else
                 if (slot == 0)
                 {
                     const int ampL = (int)(l * 255.0f + 0.5f);
                     const int ampH = (int)(h * 255.0f + 0.5f);
-                    const Uint32 nowMs = SDL_GetTicks();
-                    if (ampL >= 16 || ampH >= 16)
+                    if (ampL < 24 && ampH < 24)
                     {
-                        if (nowMs - s_lastRumbleMs >= 180)
+                        // Let short finite Android VibrationEffect pulses expire naturally without flooding
+                        // Bluetooth HID with redundant cancel() packets after every shot.
+                        s_rumbleLow[slot] = low;
+                        s_rumbleHigh[slot] = high;
+                        s_lastAmpL = 0;
+                        s_lastAmpH = 0;
+                    }
+                    else
+                    {
+                        const Uint32 nowMs = SDL_GetTicks();
+                        if (nowMs - s_lastRumbleMs >= 100)
                         {
+                            s_rumbleLow[slot] = low;
+                            s_rumbleHigh[slot] = high;
                             s_lastAmpL = ampL;
                             s_lastAmpH = ampH;
                             s_lastRumbleMs = nowMs;
@@ -454,13 +466,11 @@ extern "C" void bo1_native_gamepad_update(void)
                             bo1_native_call_activity("setControllerRumble", rumbleSpec);
                         }
                     }
-                    else
-                    {
-                        // Let short finite Android VibrationEffect pulses expire naturally without flooding
-                        // Bluetooth HID with redundant cancel() packets after every shot.
-                        s_lastAmpL = 0;
-                        s_lastAmpH = 0;
-                    }
+                }
+                else
+                {
+                    s_rumbleLow[slot] = low;
+                    s_rumbleHigh[slot] = high;
                 }
 #endif
             }

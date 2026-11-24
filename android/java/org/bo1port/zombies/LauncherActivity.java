@@ -1591,6 +1591,8 @@ public class LauncherActivity extends Activity {
                     { "r_picmip", "0" },
                     { "r_picmip_bump", "0" },
                     { "r_picmip_spec", "0" },
+                    { "r_lodScaleRigid", "0.15" },
+                    { "r_lodScaleSkinned", "0.5" },
             };
         } else if (profile == 2) {
             // Low / Max FPS (best for entry-level Mali / Helio GPUs or chasing 120 FPS)
@@ -1610,6 +1612,8 @@ public class LauncherActivity extends Activity {
                     { "r_picmip", "1" },
                     { "r_picmip_bump", "1" },
                     { "r_picmip_spec", "1" },
+                    { "r_lodScaleRigid", "0.35" },
+                    { "r_lodScaleSkinned", "1" },
             };
         } else {
             // 0 = Mobile Optimized (Recommended): full crisp textures & lighting, lightweight 512p shadows
@@ -1629,6 +1633,8 @@ public class LauncherActivity extends Activity {
                     { "r_picmip", "0" },
                     { "r_picmip_bump", "0" },
                     { "r_picmip_spec", "0" },
+                    { "r_lodScaleRigid", "0.2" },
+                    { "r_lodScaleSkinned", "0.75" },
             };
         }
 

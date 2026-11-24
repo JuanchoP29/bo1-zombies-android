@@ -668,7 +668,7 @@ void __cdecl R_RegisterDvars()
                                             1.0,
                                             0.0,
                                             3.4028235e38,
-                                            0x80u,
+                                            1u,
                                             "Scale the level of detail distance for rigid models (larger reduces detail)");
     r_lodBiasRigid = _Dvar_RegisterFloat(
                                          "r_lodBiasRigid",
@@ -682,7 +682,7 @@ void __cdecl R_RegisterDvars()
                                                 1.0,
                                                 0.0,
                                                 3.4028235e38,
-                                                0x80u,
+                                                1u,
                                                 "Scale the level of detail distance for skinned models (larger reduces detail)");
     r_lodBiasSkinned = _Dvar_RegisterFloat(
                                              "r_lodBiasSkinned",
