@@ -193,7 +193,7 @@ public final class InGameMenuDialog {
         int sprintPct = prefs.getInt("touchSprintThreshPct", 85);
         boolean aimFire = prefs.getInt("touchAimOnFire", 0) != 0;
         boolean autoFire = prefs.getInt("touchAutoFire", 1) != 0;
-        int rumbleMode = prefs.getInt("padRumble", 1);
+        int rumbleMode = (prefs.getInt("padRumble", 1) == 0) ? 0 : 1;
 
         addSpinnerRow("Controles táctiles", new String[] { "Activados", "Desactivados" },
                 touchOn == 1 ? 0 : 1, new IntAction() {
@@ -215,13 +215,14 @@ public final class InGameMenuDialog {
                 });
 
         addSpinnerRow("Vibración del mando", new String[] {
-                "Desactivada (0% BT)", "Segura BT (1 motor)", "Completa (2 motores)"
+                "Desactivada", "Activada (BT / USB)"
         }, rumbleMode, new IntAction() {
             @Override
             public void run(int pos) {
-                prefs.edit().putInt("padRumble", pos).apply();
-                activity.setPadRumbleMode(pos);
-                sendCmd("set gpad_rumble " + (pos == 0 ? 0 : 1));
+                int val = (pos == 0) ? 0 : 1;
+                prefs.edit().putInt("padRumble", val).apply();
+                activity.setPadRumbleMode(val);
+                sendCmd("set gpad_rumble " + val);
             }
         });
 

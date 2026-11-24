@@ -358,7 +358,12 @@ int    R_SkinXModel(
     LodRampType = XModelGetLodRampType(model);
     adjustedDist = R_GetAdjustedLodDist(dist, LodRampType);
     if ( offscreen )
-        adjustedDist = adjustedDist * r_offscreenCasterLodScale->current.value;
+    {
+        float casterScale = r_offscreenCasterLodScale->current.value;
+        if ( bo1_shadow_fast && bo1_shadow_fast->current.enabled && casterScale < 4.0f )
+            casterScale = 4.0f;
+        adjustedDist = adjustedDist * casterScale;
+    }
     LodForDist = XModelGetLodForDist(model, adjustedDist, dist, 0);
     if ( LodForDist < 0 )
         return 0;

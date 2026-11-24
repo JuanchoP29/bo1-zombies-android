@@ -681,7 +681,7 @@ const struct __declspec(align(32)) GfxBackEndData // sizeof=0x186300
     unsigned int emissiveSpotLightCount;
     bool extraCamLargeFrameSize;
     bool bo1SkipSunShadowRender; // mod (custom24): reuse previous frame's sun shadowmap
-    // padding byte
+    bool bo1SkipSpotShadowRender; // mod (custom26): reuse previous frame's spot shadowmaps
     // padding byte
     GfxSunShadow sunShadow;
     unsigned int spotShadowCount;

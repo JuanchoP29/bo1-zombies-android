@@ -99,7 +99,7 @@ public class LauncherActivity extends Activity {
     private int resIndex = 0;          // 0=Keep, 1=1200x540, 2=1600x720, 3=1800x810, 4=2000x900, 5=Native
     private int fpsIndex = 0;          // 0=60, 1=90, 2=120, 3=Unlimited
     private int vsync = 0;             // 0=Off, 1=On
-    private int shadows = 2;           // 0=Off, 1=Full (512p), 2=Mobile Fast (256p + Half-Rate)
+    private int shadows = 0;           // 0=Off (Recommended 90 FPS), 1=Full (512p), 2=Mobile Fast (256p + Interleaved)
     private int shaderWarming = 1;     // 1=On, 0=Off
     private int vkAsync = 1;           // 0=Wait, 1=Effects bg, 2=All bg
     private int fpsCounter = 3;        // 0=None, 1=Simple, 2=Advanced, 3=Full
@@ -157,8 +157,8 @@ public class LauncherActivity extends Activity {
         resIndex = prefs.getInt("resIndex", 0);
         fpsIndex = prefs.getInt("fpsIndex", 0);
         vsync = prefs.getInt("vsync", 0);
-        shadows = prefs.getInt("shadows", 2);
-        if (shadows < 0 || shadows > 2) shadows = 2;
+        shadows = prefs.getInt("shadows", 0);
+        if (shadows < 0 || shadows > 2) shadows = 0;
         shaderWarming = prefs.getInt("shaderWarming", 1);
         vkAsync = prefs.getInt("vkAsync", 1);
         fpsCounter = prefs.getInt("fpsCounter", 3);
@@ -170,7 +170,7 @@ public class LauncherActivity extends Activity {
         touchSensPct = prefs.getInt("touchSensPct", 12);
         touchOpacityPct = prefs.getInt("touchOpacityPct", 45);
         padDeadzonePct = prefs.getInt("padDeadzonePct", 10);
-        padRumble = prefs.getInt("padRumble", 1);
+        padRumble = (prefs.getInt("padRumble", 1) == 0) ? 0 : 1;
         coopName = prefs.getString("coopName", "Survivor");
         coopMapIndex = prefs.getInt("coopMapIndex", 0);
         coopMaxPlayersIdx = prefs.getInt("coopMaxPlayersIdx", 2);
@@ -1321,13 +1321,13 @@ public class LauncherActivity extends Activity {
                     }
                 });
 
-        int shadowSpinIdx = (shadows == 2) ? 0 : (shadows == 1 ? 1 : 2);
+        int shadowSpinIdx = (shadows == 0) ? 0 : (shadows == 2 ? 1 : 2);
         addSpinnerRow(card, "Sombras dinámicas", new String[] {
-                "Móvil Rápidas (256p + Half-Rate, ideal 90 FPS)", "Completas (512p PC)", "Desactivadas (+FPS y -calor)"
+                "Desactivadas (Máx. FPS en hordas — Rec.)", "Móvil Ligeras (256p Intercaladas)", "Completas (512p PC)"
         }, shadowSpinIdx, new IntConsumer() {
                     @Override
                     public void accept(int v) {
-                        shadows = (v == 0) ? 2 : (v == 1 ? 1 : 0);
+                        shadows = (v == 0) ? 0 : (v == 1 ? 2 : 1);
                     }
                 });
 
@@ -1421,11 +1421,11 @@ public class LauncherActivity extends Activity {
 
         LinearLayout padCard = makeCard("MANDO (BLUETOOTH / USB)");
         addSpinnerRow(padCard, "Vibración del mando", new String[] {
-                "Desactivada (0% cortes BT)", "Segura BT (1 motor suave)", "Completa (USB / Cable)"
+                "Desactivada", "Activada (BT / USB)"
         }, padRumble, new IntConsumer() {
             @Override
             public void accept(int v) {
-                padRumble = v;
+                padRumble = (v == 0) ? 0 : 1;
             }
         });
         addSliderRow(padCard, "Zona muerta de sticks", 5, 25, padDeadzonePct, "", 0.01f, new IntConsumer() {
@@ -1592,7 +1592,10 @@ public class LauncherActivity extends Activity {
                     { "r_picmip_bump", "0" },
                     { "r_picmip_spec", "0" },
                     { "r_lodScaleRigid", "0.15" },
-                    { "r_lodScaleSkinned", "0.5" },
+                    { "r_lodScaleSkinned", "1" },
+                    { "ragdoll_max_simulating", "8" },
+                    { "fx_marks_ents", "1" },
+                    { "cg_brass", "1" },
             };
         } else if (profile == 2) {
             // Low / Max FPS (best for entry-level Mali / Helio GPUs or chasing 120 FPS)
@@ -1613,10 +1616,13 @@ public class LauncherActivity extends Activity {
                     { "r_picmip_bump", "1" },
                     { "r_picmip_spec", "1" },
                     { "r_lodScaleRigid", "0.35" },
-                    { "r_lodScaleSkinned", "1" },
+                    { "r_lodScaleSkinned", "1.35" },
+                    { "ragdoll_max_simulating", "4" },
+                    { "fx_marks_ents", "0" },
+                    { "cg_brass", "0" },
             };
         } else {
-            // 0 = Mobile Optimized (Recommended): full crisp textures & lighting, lightweight 512p shadows
+            // 0 = Mobile Optimized (Recommended): full crisp textures & lighting, horde-friendly LODs
             pairs = new String[][] {
                     { "r_depthPrepass", "0" },
                     { "r_aaAlpha", "off" },
@@ -1634,7 +1640,10 @@ public class LauncherActivity extends Activity {
                     { "r_picmip_bump", "0" },
                     { "r_picmip_spec", "0" },
                     { "r_lodScaleRigid", "0.2" },
-                    { "r_lodScaleSkinned", "0.75" },
+                    { "r_lodScaleSkinned", "1.1" },
+                    { "ragdoll_max_simulating", "8" },
+                    { "fx_marks_ents", "0" },
+                    { "cg_brass", "0" },
             };
         }
 

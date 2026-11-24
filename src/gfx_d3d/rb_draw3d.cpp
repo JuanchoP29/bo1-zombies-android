@@ -760,7 +760,8 @@ void __cdecl RB_StandardDrawCommands(GfxViewInfo *viewInfo)
     if ( Com_BitCheckAssert(data->shadowableLightHasShadowMap, rgp.world->sunPrimaryLightIndex, 32)
       && !data->bo1SkipSunShadowRender )
       RB_SunShadowMaps(data, viewInfo);
-    RB_SpotShadowMaps(data, viewInfo);
+    if ( !data->bo1SkipSpotShadowRender )
+      RB_SpotShadowMaps(data, viewInfo);
   }
   RB_BO1GpuMark(1); // p1: bo1_frameperf GPU phase (measurement only)
   needsDepthPrepass = !isMissileCam;

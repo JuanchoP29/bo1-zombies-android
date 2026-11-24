@@ -3,6 +3,7 @@
 #include <cgame/cg_pose_utils.h>
 #include "r_dobj_skin.h"
 #include "r_dvars.h"
+#include "r_init.h"
 #include "rb_backend.h"
 #include "r_debug.h"
 #include <universal/com_workercmds.h>
@@ -47,7 +48,16 @@ void __cdecl R_AddSpotShadowEntCmd(const GfxSpotShadowEntCmd *data)
         boxHalfSize[0] = boxCenter[0] - localSceneEnt->cull.mins[0];
         boxHalfSize[1] = boxCenter[1] - localSceneEnt->cull.mins[1];
         boxHalfSize[2] = boxCenter[2] - localSceneEnt->cull.mins[2];
-        if ( CullBoxFromCone(localLight->origin, localLight->dir, localLight->cosHalfFovOuter, boxCenter, boxHalfSize) )
+        bool culledFarHorde = false;
+        if ( bo1_shadow_fast && bo1_shadow_fast->current.enabled )
+        {
+            const float dxCam = boxCenter[0] - rg.lodParms.origin[0];
+            const float dyCam = boxCenter[1] - rg.lodParms.origin[1];
+            const float dzCam = boxCenter[2] - rg.lodParms.origin[2];
+            if ( (dxCam * dxCam + dyCam * dyCam + dzCam * dzCam) > (480.0f * 480.0f) )
+                culledFarHorde = true;
+        }
+        if ( culledFarHorde || CullBoxFromCone(localLight->origin, localLight->dir, localLight->cosHalfFovOuter, boxCenter, boxHalfSize) )
         {
             CG_UsedDObjCalcPose(localSceneEnt->info.pose);
         }
@@ -160,8 +170,7 @@ char __cdecl R_AddSpotShadowsForLight(
         nearPlaneBias = scene.dynamicSpotLightNearPlaneOffset;
     R_SetViewParmsForLight(light, &spotShadow->shadowViewParms, nearPlaneBias);
     R_GetSpotShadowLookupMatrix(&spotShadow->shadowViewParms, 0, 0, spotShadowIndex, tileCount, &spotShadow->lookupMatrix);
-    if (R_IsPrimaryLight(shadowableLightIndex))
-        R_AddSpotShadowModelEntities(viewInfo->localClientNum, shadowableLightIndex, light);
+    // R_AddSpotShadowModelEntities is dispatched from R_GenerateSortedDrawSurfs only when spot shadows are not reused.
     return 1;
 }
 

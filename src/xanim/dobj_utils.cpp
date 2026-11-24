@@ -155,7 +155,12 @@ void __cdecl DObjGetSurfaceData(const DObj *obj, const float *origin, float scal
             lodRampType = XModelGetLodRampType(model);
             adjustedDist = R_GetAdjustedLodDist(baseDist, lodRampType);
             if ( offscreen )
-                adjustedDist = adjustedDist * r_offscreenCasterLodScale->current.value;
+            {
+                float casterScale = r_offscreenCasterLodScale->current.value;
+                if ( bo1_shadow_fast && bo1_shadow_fast->current.enabled && casterScale < 4.0f )
+                    casterScale = 4.0f;
+                adjustedDist = adjustedDist * casterScale;
+            }
             lod = DObjGetLodForDist(obj, modelIndex, adjustedDist, baseDist);
         }
         lods[modelIndex] = lod;

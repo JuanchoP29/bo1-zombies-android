@@ -1079,10 +1079,14 @@ void __cdecl R_AddAllSceneEntSurfacesRangeSunShadow(unsigned int partitionIndex)
     lastDrawSurf = &drawSurf[scene.maxDrawSurfCount[stage]];
     shadowmapBuildTechType = gfxMetrics.shadowmapBuildTechType;
     sceneEntCount = scene.sceneDObjCount;
-    for ( sceneEntIndex = 0; sceneEntIndex < sceneEntCount; ++sceneEntIndex )
+    // mod (custom26): in fast shadow mode, skip animated zombie/corpse casters in the far sun cascade (partition 1)
+    if ( !(partitionIndex == 1 && bo1_shadow_fast && bo1_shadow_fast->current.enabled) )
     {
-        if ( scene.sceneDObjVisData[partitionIndex + 1][sceneEntIndex] == 1 )
-            drawSurf = R_AddDObjSurfaces(&scene.sceneDObj[sceneEntIndex], shadowmapBuildTechType, drawSurf, lastDrawSurf);
+        for ( sceneEntIndex = 0; sceneEntIndex < sceneEntCount; ++sceneEntIndex )
+        {
+            if ( scene.sceneDObjVisData[partitionIndex + 1][sceneEntIndex] == 1 )
+                drawSurf = R_AddDObjSurfaces(&scene.sceneDObj[sceneEntIndex], shadowmapBuildTechType, drawSurf, lastDrawSurf);
+        }
     }
     sceneEntCounta = scene.sceneModelCount;
     for ( sceneEntIndexa = 0; sceneEntIndexa < sceneEntCounta; ++sceneEntIndexa )

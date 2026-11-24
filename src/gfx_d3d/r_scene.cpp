@@ -3799,6 +3799,7 @@ void __cdecl R_GenerateSortedDrawSurfs(
     {
         PROF_SCOPED("bsp surfaces"); 
         frontEndDataOut->bo1SkipSunShadowRender = false;
+        frontEndDataOut->bo1SkipSpotShadowRender = false;
         if (gfxDrawMethod.drawScene == GFX_DRAW_SCENE_STANDARD)
         {
             R_AddAllBspDrawSurfacesCamera(viewInfo->localClientNum, viewInfo->visibleLights, viewInfo->visibleLightCount);
@@ -3823,13 +3824,65 @@ void __cdecl R_GenerateSortedDrawSurfs(
             static unsigned int s_cachedSunEpoch = 0;
             static int s_cachedSunRes = 0;
             static float s_cachedSunScale = 0.0f;
-            static unsigned int s_sunShadowParity = 0;
             static bool s_cachedSunValid = false;
+
+            static const GfxWorld *s_cachedSpotWorld = NULL;
+            static unsigned int s_cachedSpotEpoch = 0;
+            static int s_cachedSpotRes = 0;
+            static int s_cachedSpotSunRes = 0;
+            static unsigned int s_cachedSpotCount = 0;
+            static bool s_cachedSpotHadSun = false;
+            static unsigned int s_cachedSpotLightIdx[4] = {};
+            static GfxRenderTargetId s_cachedSpotTarget[4] = {};
+            static GfxMatrix s_cachedSpotLookup[4] = {};
+            static bool s_cachedSpotValid = false;
+
+            static unsigned int s_shadowFastParity = 0;
+
+            const bool fastEnabled = (bo1_shadow_fast && bo1_shadow_fast->current.enabled);
             const bool hasSunShadow = (dynamicShadowType == SHADOW_MAP
                 && Com_BitCheckAssert(frontEndDataOut->shadowableLightHasShadowMap, rgp.world->sunPrimaryLightIndex, 32));
+            const bool hasSpotShadow = (dynamicShadowType == SHADOW_MAP && frontEndDataOut->spotShadowCount > 0);
             bool reuseSunShadow = false;
-            if ( !forMissileCamView )
+            bool reuseSpotShadow = false;
+
+            if ( forMissileCamView )
             {
+                if ( hasSunShadow )
+                    s_cachedSunValid = false;
+                if ( hasSpotShadow )
+                    s_cachedSpotValid = false;
+            }
+            else
+            {
+                const unsigned int phase = (fastEnabled && (hasSunShadow || hasSpotShadow)) ? (s_shadowFastParity++ & 1u) : 0u;
+
+                bool spotCacheOk = fastEnabled
+                    && hasSpotShadow
+                    && s_cachedSpotValid
+                    && !viewInfo->playerTeleported
+                    && s_cachedSpotWorld == rgp.world
+                    && s_cachedSpotEpoch == dx.shadowmapInitEpoch
+                    && s_cachedSpotRes == dx.spotShadowmapSize
+                    && s_cachedSpotSunRes == dx.sunShadowmapSize
+                    && s_cachedSpotCount == frontEndDataOut->spotShadowCount
+                    && s_cachedSpotHadSun == hasSunShadow;
+                if ( spotCacheOk )
+                {
+                    for ( unsigned int i = 0; i < frontEndDataOut->spotShadowCount; ++i )
+                    {
+                        const GfxSpotShadow &ss = frontEndDataOut->spotShadows[i];
+                        if ( !R_IsPrimaryLight(ss.shadowableLightIndex)
+                            || s_cachedSpotLightIdx[i] != ss.shadowableLightIndex
+                            || s_cachedSpotTarget[i] != ss.renderTargetId
+                            || memcmp(&s_cachedSpotLookup[i], &ss.lookupMatrix, sizeof(GfxMatrix)) != 0 )
+                        {
+                            spotCacheOk = false;
+                            break;
+                        }
+                    }
+                }
+
                 if ( !hasSunShadow )
                 {
                     s_cachedSunValid = false;
@@ -3837,8 +3890,7 @@ void __cdecl R_GenerateSortedDrawSurfs(
                 }
                 else
                 {
-                    const bool fastEnabled = (bo1_shadow_fast && bo1_shadow_fast->current.enabled);
-                    const bool cacheOk = fastEnabled
+                    const bool sunCacheOk = fastEnabled
                         && s_cachedSunValid
                         && !viewInfo->playerTeleported
                         && s_cachedSunWorld == rgp.world
@@ -3846,11 +3898,62 @@ void __cdecl R_GenerateSortedDrawSurfs(
                         && s_cachedSunRes == dx.sunShadowmapSize
                         && fabs(s_cachedSunScale - rg.sunShadowmapScale) < 0.001f
                         && !frontEndDataOut->prim.hasSunDirChanged;
-                    if ( cacheOk && ((++s_sunShadowParity & 1u) != 0) )
+                    if ( sunCacheOk && phase == 1u )
                         reuseSunShadow = true;
                     frontEndDataOut->bo1SkipSunShadowRender = reuseSunShadow;
                 }
+
+                if ( !hasSpotShadow )
+                {
+                    s_cachedSpotValid = false;
+                    frontEndDataOut->bo1SkipSpotShadowRender = false;
+                }
+                else
+                {
+                    // Interleave SpotShadow with SunShadow: when both exist, phase 0 updates Sun (reuses Spot),
+                    // phase 1 updates Spot (reuses Sun). When only Spot exists, phase 1 updates / phase 0 reuses.
+                    const unsigned int reusePhase = hasSunShadow ? 0u : 1u;
+                    if ( spotCacheOk && phase == reusePhase )
+                        reuseSpotShadow = true;
+                    frontEndDataOut->bo1SkipSpotShadowRender = reuseSpotShadow;
+
+                    if ( !reuseSpotShadow )
+                    {
+                        bool spotUsesSunTarget = false;
+                        s_cachedSpotWorld = rgp.world;
+                        s_cachedSpotEpoch = dx.shadowmapInitEpoch;
+                        s_cachedSpotRes = dx.spotShadowmapSize;
+                        s_cachedSpotSunRes = dx.sunShadowmapSize;
+                        s_cachedSpotCount = frontEndDataOut->spotShadowCount;
+                        s_cachedSpotHadSun = hasSunShadow;
+                        s_cachedSpotValid = true;
+                        for ( unsigned int i = 0; i < frontEndDataOut->spotShadowCount; ++i )
+                        {
+                            const GfxSpotShadow &ss = frontEndDataOut->spotShadows[i];
+                            s_cachedSpotLightIdx[i] = ss.shadowableLightIndex;
+                            s_cachedSpotTarget[i] = ss.renderTargetId;
+                            s_cachedSpotLookup[i] = ss.lookupMatrix;
+                            if ( !R_IsPrimaryLight(ss.shadowableLightIndex) )
+                                s_cachedSpotValid = false;
+                            if ( ss.renderTargetId == R_RENDERTARGET_SHADOWMAP_SUN )
+                                spotUsesSunTarget = true;
+                        }
+                        if ( spotUsesSunTarget )
+                            s_cachedSunValid = false;
+                    }
+                }
             }
+
+            if ( hasSpotShadow && !frontEndDataOut->bo1SkipSpotShadowRender )
+            {
+                for ( unsigned int i = 0; i < frontEndDataOut->spotShadowCount; ++i )
+                {
+                    const unsigned int lightIdx = frontEndDataOut->spotShadows[i].shadowableLightIndex;
+                    if ( R_IsPrimaryLight(lightIdx) )
+                        R_AddSpotShadowModelEntities(viewInfo->localClientNum, lightIdx, frontEndDataOut->spotShadows[i].light);
+                }
+            }
+
             if ( hasSunShadow )
             {
                 rg.drawSunShadow = 1;
@@ -3987,7 +4090,13 @@ void __cdecl R_GenerateSortedDrawSurfs(
                 for ( partitionIndex = 0; partitionIndex < 2; ++partitionIndex )
                     R_InitDrawSurfListInfo(&viewInfo->drawList[partitionIndex + 8]);
             }
-            R_GenerateAllSortedSpotShadowDrawSurfs(viewInfo, viewInfoIndex);
+            if ( !frontEndDataOut->bo1SkipSpotShadowRender )
+                R_GenerateAllSortedSpotShadowDrawSurfs(viewInfo, viewInfoIndex);
+            else
+            {
+                for ( unsigned int s = 0; s < 4; ++s )
+                    R_InitDrawSurfListInfo(&viewInfo->drawList[s + 10]);
+            }
         }
     }
     R_SetAllStaticModelLighting();

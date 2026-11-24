@@ -86,7 +86,7 @@ public class Bo1Activity extends SDLActivity {
             secondScreen = null;   // no second-screen controller; the game is not affected
         }
         try {
-            padRumbleMode = getSharedPreferences("bo1_launcher_prefs", MODE_PRIVATE).getInt("padRumble", 1);
+            padRumbleMode = (getSharedPreferences("bo1_launcher_prefs", MODE_PRIVATE).getInt("padRumble", 1) == 0) ? 0 : 1;
         } catch (Throwable ignored) {
             padRumbleMode = 1;
         }
@@ -174,7 +174,7 @@ public class Bo1Activity extends SDLActivity {
     }
 
     public void setPadRumbleMode(int mode) {
-        padRumbleMode = Math.max(0, Math.min(2, mode));
+        padRumbleMode = (mode == 0) ? 0 : 1;
     }
 
     public void openQuickMenu(final boolean pauseIfIngame) {
@@ -197,7 +197,7 @@ public class Bo1Activity extends SDLActivity {
     }
 
     private boolean rumbleLogged;
-    private int padRumbleMode = 1; // 0=Off, 1=Safe BT (single-motor 80ms/360ms, 280ms quiet gap), 2=Full USB
+    private int padRumbleMode = 1; // 0=Off, 1=On (async non-overlapping dual-motor 140ms / 220ms)
     private long lastRumbleAtMs = 0L;
     private HandlerThread rumbleThread;
     private Handler rumbleHandler;
@@ -276,9 +276,8 @@ public class Bo1Activity extends SDLActivity {
     /**
      * Native Android gamepad rumble (dispatched asynchronously off the game thread).
      * Mode 0: completely disabled (0 Bluetooth HID output packets ever).
-     * Mode 1 (Safe BT): single-motor 80 ms finite pulse, 360 ms minimum interval (280 ms guaranteed quiet gap
-     *   after auto-stop), capped amplitude (160), and NO cancel() HID spam so BT HID stacks never hit status:8.
-     * Mode 2 (Full USB): dual-motor 140 ms pulse, 220 ms interval (80 ms quiet gap, never overlaps).
+     * Mode 1 (Active): dual-motor 140 ms finite pulse, 220 ms minimum interval (80 ms quiet gap after
+     *   auto-stop so pulses never overlap or flood Bluetooth HID).
      */
     public void setControllerRumble(String spec) {
         try {
@@ -293,16 +292,12 @@ public class Bo1Activity extends SDLActivity {
             final int low = Math.max(0, Math.min(255, Integer.parseInt(parts[0])));
             final int high = Math.max(0, Math.min(255, Integer.parseInt(parts[1])));
             final boolean stopping = (low == 0 && high == 0);
-            if (stopping && mode == 1) {
-                // In Safe BT mode, short 80 ms pulses stop automatically; skip redundant HID cancel packets.
-                return;
-            }
             if (!stopping && Math.max(low, high) < 24) {
                 return;
             }
 
             final long now = SystemClock.uptimeMillis();
-            final long minIntervalMs = (mode == 1) ? 360L : 220L;
+            final long minIntervalMs = 220L;
             if (!stopping && (now - lastRumbleAtMs) < minIntervalMs) {
                 return;
             }
@@ -313,7 +308,7 @@ public class Bo1Activity extends SDLActivity {
             h.post(new Runnable() {
                 @Override
                 public void run() {
-                    dispatchControllerRumble(low, high, stopping, mode, now);
+                    dispatchControllerRumble(low, high, stopping, now);
                 }
             });
         } catch (Throwable t) {
@@ -324,14 +319,13 @@ public class Bo1Activity extends SDLActivity {
         }
     }
 
-    private void dispatchControllerRumble(int low, int high, boolean stopping, int mode, long nowMs) {
+    private void dispatchControllerRumble(int low, int high, boolean stopping, long nowMs) {
         try {
             InputDevice dev = resolveRumbleDevice(nowMs);
             if (dev == null) {
                 return;
             }
-            final int pulseMs = (mode == 1) ? 80 : 140;
-            final int maxAmp = (mode == 1) ? 160 : 255;
+            final int pulseMs = 140;
 
             if (Build.VERSION.SDK_INT >= 31) {
                 VibratorManager vm = dev.getVibratorManager();
@@ -341,25 +335,23 @@ public class Bo1Activity extends SDLActivity {
                         if (!rumbleLogged && !stopping) {
                             rumbleLogged = true;
                             Log.i("BO1Rumble", "VibratorManager on '" + dev.getName()
-                                    + "' mode=" + mode + " motors=" + vibIds.length);
+                                    + "' motors=" + vibIds.length);
                         }
                         if (stopping) {
                             vm.cancel();
-                        } else if (mode == 2 && vibIds.length >= 2) {
+                        } else if (vibIds.length >= 2) {
                             CombinedVibration.ParallelCombination combo = CombinedVibration.startParallel();
                             if (low > 0) {
-                                combo.addVibrator(vibIds[0], VibrationEffect.createOneShot(pulseMs, Math.min(maxAmp, low)));
+                                combo.addVibrator(vibIds[0], VibrationEffect.createOneShot(pulseMs, low));
                             }
                             if (high > 0) {
-                                combo.addVibrator(vibIds[1], VibrationEffect.createOneShot(pulseMs, Math.min(maxAmp, high)));
+                                combo.addVibrator(vibIds[1], VibrationEffect.createOneShot(pulseMs, high));
                             }
                             vm.vibrate(combo.combine());
                         } else {
-                            // Safe BT / single motor: 1 HID write only, preferring light motor for high-freq shots
-                            int targetMotor = (vibIds.length >= 2 && high > low) ? vibIds[1] : vibIds[0];
-                            int amp = Math.max(1, Math.min(maxAmp, Math.max(low, high)));
+                            int amp = Math.max(1, Math.max(low, high));
                             CombinedVibration single = CombinedVibration.startParallel()
-                                    .addVibrator(targetMotor, VibrationEffect.createOneShot(pulseMs, amp))
+                                    .addVibrator(vibIds[0], VibrationEffect.createOneShot(pulseMs, amp))
                                     .combine();
                             vm.vibrate(single);
                         }
@@ -372,12 +364,12 @@ public class Bo1Activity extends SDLActivity {
             if (vib != null && vib.hasVibrator()) {
                 if (!rumbleLogged && !stopping) {
                     rumbleLogged = true;
-                    Log.i("BO1Rumble", "Legacy Vibrator on '" + dev.getName() + "' mode=" + mode);
+                    Log.i("BO1Rumble", "Legacy Vibrator on '" + dev.getName() + "'");
                 }
                 if (stopping) {
                     vib.cancel();
                 } else {
-                    int amp = Math.max(1, Math.min(maxAmp, Math.max(low, high)));
+                    int amp = Math.max(1, Math.max(low, high));
                     vib.vibrate(VibrationEffect.createOneShot(pulseMs, amp));
                 }
             }
