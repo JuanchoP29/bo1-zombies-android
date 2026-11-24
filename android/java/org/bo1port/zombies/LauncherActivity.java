@@ -2,6 +2,8 @@ package org.bo1port.zombies;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
@@ -15,6 +17,7 @@ import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
+import android.text.InputType;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -24,6 +27,7 @@ import android.view.Window;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -39,9 +43,14 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
 import java.util.zip.ZipEntry;
@@ -72,7 +81,7 @@ public class LauncherActivity extends Activity {
     private SharedPreferences prefs;
 
     private int currentTab = 0;
-    private final Button[] tabButtons = new Button[4];
+    private final Button[] tabButtons = new Button[5];
     private LinearLayout tabContent;
 
     // Live UI references for refresh
@@ -80,6 +89,8 @@ public class LauncherActivity extends Activity {
     private TextView gameStatusView;
     private LinearLayout driverListBox;
     private LinearLayout savesListBox;
+    private TextView coopIpView;
+    private String coopPrimaryIp = "";
 
     // Settings state
     private int modeZombies = 1;       // 1 = Zombies, 0 = Multiplayer
@@ -88,7 +99,7 @@ public class LauncherActivity extends Activity {
     private int resIndex = 0;          // 0=Keep, 1=1200x540, 2=1600x720, 3=1800x810, 4=2000x900, 5=Native
     private int fpsIndex = 0;          // 0=60, 1=90, 2=120, 3=Unlimited
     private int vsync = 0;             // 0=Off, 1=On
-    private int shadows = 1;           // 1=On, 0=Off
+    private int shadows = 2;           // 0=Off, 1=Full (512p), 2=Mobile Fast (256p + Half-Rate)
     private int shaderWarming = 1;     // 1=On, 0=Off
     private int vkAsync = 1;           // 0=Wait, 1=Effects bg, 2=All bg
     private int fpsCounter = 3;        // 0=None, 1=Simple, 2=Advanced, 3=Full
@@ -101,6 +112,13 @@ public class LauncherActivity extends Activity {
     private int touchOpacityPct = 45;  // 10..100 -> 0.10..1.00
     private int padDeadzonePct = 10;   // 5..25 -> 0.05..0.25
     private int padRumble = 1;         // 1=On (rate-limited safe), 0=Off
+
+    // CO-OP / Online state
+    private String coopName = "Survivor";
+    private int coopMapIndex = 0;
+    private int coopMaxPlayersIdx = 2; // 0=2, 1=3, 2=4, 3=6, 4=8
+    private String coopJoinIp = "";
+    private String coopRecentIps = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -124,9 +142,11 @@ public class LauncherActivity extends Activity {
             refreshGameStatus();
             refreshSavesList();
         } else if (currentTab == 1) {
+            refreshCoopIp();
+        } else if (currentTab == 2) {
             refreshDriverList();
-        } else if (currentTab == 3) {
-            selectTab(3);
+        } else if (currentTab == 4) {
+            selectTab(4);
         }
     }
 
@@ -137,7 +157,8 @@ public class LauncherActivity extends Activity {
         resIndex = prefs.getInt("resIndex", 0);
         fpsIndex = prefs.getInt("fpsIndex", 0);
         vsync = prefs.getInt("vsync", 0);
-        shadows = prefs.getInt("shadows", 1);
+        shadows = prefs.getInt("shadows", 2);
+        if (shadows < 0 || shadows > 2) shadows = 2;
         shaderWarming = prefs.getInt("shaderWarming", 1);
         vkAsync = prefs.getInt("vkAsync", 1);
         fpsCounter = prefs.getInt("fpsCounter", 3);
@@ -150,6 +171,11 @@ public class LauncherActivity extends Activity {
         touchOpacityPct = prefs.getInt("touchOpacityPct", 45);
         padDeadzonePct = prefs.getInt("padDeadzonePct", 10);
         padRumble = prefs.getInt("padRumble", 1);
+        coopName = prefs.getString("coopName", "Survivor");
+        coopMapIndex = prefs.getInt("coopMapIndex", 0);
+        coopMaxPlayersIdx = prefs.getInt("coopMaxPlayersIdx", 2);
+        coopJoinIp = prefs.getString("coopJoinIp", "");
+        coopRecentIps = prefs.getString("coopRecentIps", "");
     }
 
     private void saveSettings() {
@@ -172,6 +198,11 @@ public class LauncherActivity extends Activity {
                 .putInt("touchOpacityPct", touchOpacityPct)
                 .putInt("padDeadzonePct", padDeadzonePct)
                 .putInt("padRumble", padRumble)
+                .putString("coopName", coopName)
+                .putInt("coopMapIndex", coopMapIndex)
+                .putInt("coopMaxPlayersIdx", coopMaxPlayersIdx)
+                .putString("coopJoinIp", coopJoinIp)
+                .putString("coopRecentIps", coopRecentIps)
                 .apply();
     }
 
@@ -246,12 +277,12 @@ public class LauncherActivity extends Activity {
         tbLp.bottomMargin = dp(8);
         tabBar.setLayoutParams(tbLp);
 
-        String[] names = { "JUEGO", "DRIVERS", "GRÁFICOS", "CONTROLES" };
+        String[] names = { "JUEGO", "CO-OP", "DRIVERS", "GRÁFICOS", "CONTROLES" };
         for (int i = 0; i < names.length; i++) {
             final int idx = i;
             Button b = new Button(this);
             b.setText(names[i]);
-            b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
             b.setTypeface(Typeface.DEFAULT_BOLD);
             b.setPadding(dp(4), dp(8), dp(4), dp(8));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
@@ -295,8 +326,10 @@ public class LauncherActivity extends Activity {
         if (index == 0) {
             buildGameTab();
         } else if (index == 1) {
-            buildDriversTab();
+            buildCoopTab();
         } else if (index == 2) {
+            buildDriversTab();
+        } else if (index == 3) {
             buildGraphicsTab();
         } else {
             buildControlsTab();
@@ -578,6 +611,403 @@ public class LauncherActivity extends Activity {
             row.addView(delBtn);
             savesListBox.addView(row);
         }
+    }
+
+    // ---- CO-OP / ONLINE TAB ----
+
+    private void buildCoopTab() {
+        LinearLayout netCard = makeCard("PERFIL Y TU IP (UDP 28960)");
+
+        TextView nameLabel = new TextView(this);
+        nameLabel.setText("Nombre en partida");
+        nameLabel.setTextColor(COL_TEXT);
+        nameLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        netCard.addView(nameLabel);
+
+        final EditText nameInput = new EditText(this);
+        nameInput.setText(coopName);
+        nameInput.setHint("Survivor");
+        nameInput.setSingleLine(true);
+        nameInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PERSON_NAME);
+        nameInput.setTextColor(COL_TEXT);
+        nameInput.setHintTextColor(COL_MUTED);
+        nameInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        nameInput.setPadding(dp(10), dp(8), dp(10), dp(8));
+        nameInput.setBackground(boxBg(COL_BG, COL_BORDER, 6));
+        LinearLayout.LayoutParams niLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        niLp.topMargin = dp(4);
+        niLp.bottomMargin = dp(10);
+        nameInput.setLayoutParams(niLp);
+        nameInput.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                coopName = s.toString();
+            }
+        });
+        netCard.addView(nameInput);
+
+        coopIpView = new TextView(this);
+        coopIpView.setTextColor(COL_OK);
+        coopIpView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        coopIpView.setTypeface(Typeface.MONOSPACE);
+        coopIpView.setPadding(0, dp(2), 0, dp(8));
+        netCard.addView(coopIpView);
+        refreshCoopIp();
+
+        LinearLayout ipBtns = new LinearLayout(this);
+        ipBtns.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams ibLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ibLp.bottomMargin = dp(6);
+        ipBtns.setLayoutParams(ibLp);
+
+        Button copyBtn = makeActionButton("COPIAR MI IP", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                refreshCoopIp();
+                if (coopPrimaryIp == null || coopPrimaryIp.isEmpty()) {
+                    Toast.makeText(LauncherActivity.this, "No se detectó IP de red activa", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (cm != null) {
+                    cm.setPrimaryClip(ClipData.newPlainText("BO1 IP", coopPrimaryIp));
+                    Toast.makeText(LauncherActivity.this, "IP copiada: " + coopPrimaryIp, Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        LinearLayout.LayoutParams cLp = (LinearLayout.LayoutParams) copyBtn.getLayoutParams();
+        cLp.width = 0;
+        cLp.weight = 1f;
+        cLp.bottomMargin = 0;
+        copyBtn.setLayoutParams(cLp);
+        ipBtns.addView(copyBtn);
+
+        Button refBtn = makeActionButton("ACTUALIZAR", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                refreshCoopIp();
+            }
+        });
+        LinearLayout.LayoutParams rLp = (LinearLayout.LayoutParams) refBtn.getLayoutParams();
+        rLp.width = 0;
+        rLp.weight = 1f;
+        rLp.leftMargin = dp(8);
+        rLp.bottomMargin = 0;
+        refBtn.setLayoutParams(rLp);
+        ipBtns.addView(refBtn);
+        netCard.addView(ipBtns);
+
+        TextView tip = new TextView(this);
+        tip.setText("Misma red (Wi-Fi/Hotspot): comparte tu IP LAN. Online a distancia (casas distintas o 4G): activen Tailscale o ZeroTier en ambos dispositivos y compartan la IP VPN.");
+        tip.setTextColor(COL_MUTED);
+        tip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        netCard.addView(tip);
+
+        // Host card
+        LinearLayout hostCard = makeCard("CREAR SALA ZOMBIES (HOST)");
+        final List<String[]> maps = getAvailableZombieMaps();
+        String[] mapLabels = new String[maps.size()];
+        for (int i = 0; i < maps.size(); i++) {
+            mapLabels[i] = maps.get(i)[1];
+        }
+        if (coopMapIndex >= mapLabels.length) {
+            coopMapIndex = 0;
+        }
+        addSpinnerRow(hostCard, "Mapa", mapLabels, coopMapIndex, new IntConsumer() {
+            @Override
+            public void accept(int v) {
+                coopMapIndex = v;
+            }
+        });
+        final int[] playerCounts = { 2, 3, 4, 6, 8 };
+        String[] playerLabels = { "2 jugadores", "3 jugadores", "4 jugadores", "6 jugadores", "8 jugadores" };
+        if (coopMaxPlayersIdx >= playerLabels.length) {
+            coopMaxPlayersIdx = 2;
+        }
+        addSpinnerRow(hostCard, "Máximo de jugadores", playerLabels, coopMaxPlayersIdx, new IntConsumer() {
+            @Override
+            public void accept(int v) {
+                coopMaxPlayersIdx = v;
+            }
+        });
+        hostCard.addView(makeActionButton("▶  CREAR SALA Y JUGAR (HOST)", true, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                coopName = nameInput.getText().toString();
+                String mapCode = maps.get(Math.max(0, Math.min(coopMapIndex, maps.size() - 1)))[0];
+                int maxPlayers = playerCounts[Math.max(0, Math.min(coopMaxPlayersIdx, playerCounts.length - 1))];
+                launchCoopHost(mapCode, maxPlayers);
+            }
+        }));
+
+        // Join card
+        LinearLayout joinCard = makeCard("UNIRSE A UNA SALA (POR IP)");
+        TextView ipLabel = new TextView(this);
+        ipLabel.setText("IP del Host (opcional :puerto, por defecto 28960)");
+        ipLabel.setTextColor(COL_TEXT);
+        ipLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        joinCard.addView(ipLabel);
+
+        final EditText joinInput = new EditText(this);
+        joinInput.setText(coopJoinIp);
+        joinInput.setHint("Ej: 192.168.1.21 o 100.x.x.x");
+        joinInput.setSingleLine(true);
+        joinInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        joinInput.setTextColor(COL_TEXT);
+        joinInput.setHintTextColor(COL_MUTED);
+        joinInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        joinInput.setPadding(dp(10), dp(8), dp(10), dp(8));
+        joinInput.setBackground(boxBg(COL_BG, COL_BORDER, 6));
+        LinearLayout.LayoutParams jiLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        jiLp.topMargin = dp(4);
+        jiLp.bottomMargin = dp(8);
+        joinInput.setLayoutParams(jiLp);
+        joinInput.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                coopJoinIp = s.toString();
+            }
+        });
+        joinCard.addView(joinInput);
+
+        if (coopRecentIps != null && !coopRecentIps.trim().isEmpty()) {
+            TextView recLabel = new TextView(this);
+            recLabel.setText("IPs recientes:");
+            recLabel.setTextColor(COL_MUTED);
+            recLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            recLabel.setPadding(0, 0, 0, dp(4));
+            joinCard.addView(recLabel);
+
+            LinearLayout recRow = new LinearLayout(this);
+            recRow.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rrLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rrLp.bottomMargin = dp(8);
+            recRow.setLayoutParams(rrLp);
+
+            String[] rec = coopRecentIps.split(",");
+            for (final String ip : rec) {
+                final String trimmed = ip.trim();
+                if (trimmed.isEmpty()) {
+                    continue;
+                }
+                Button b = new Button(this);
+                b.setText(trimmed);
+                b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+                b.setTextColor(COL_TEXT);
+                b.setBackground(boxBg(0xFF1F2631, COL_BORDER, 6));
+                b.setPadding(dp(8), dp(4), dp(8), dp(4));
+                b.setMinHeight(0);
+                b.setMinimumHeight(dp(30));
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                blp.rightMargin = dp(6);
+                b.setLayoutParams(blp);
+                b.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        joinInput.setText(trimmed);
+                        coopJoinIp = trimmed;
+                    }
+                });
+                recRow.addView(b);
+            }
+            joinCard.addView(recRow);
+        }
+
+        joinCard.addView(makeActionButton("▶  UNIRSE AL HOST", true, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                coopName = nameInput.getText().toString();
+                String target = joinInput.getText().toString().trim();
+                if (target.isEmpty()) {
+                    Toast.makeText(LauncherActivity.this, "Ingresa la IP del Host", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                coopJoinIp = target;
+                recordRecentCoopIp(target);
+                launchCoopJoin(target);
+            }
+        }));
+    }
+
+    private void refreshCoopIp() {
+        if (coopIpView == null) {
+            return;
+        }
+        List<String[]> ips = detectNetworkIps();
+        if (ips.isEmpty()) {
+            coopPrimaryIp = "";
+            coopIpView.setTextColor(COL_ERR);
+            coopIpView.setText("Sin IP de red detectada (activa Wi-Fi, Hotspot o Tailscale/ZeroTier)");
+            return;
+        }
+        coopPrimaryIp = ips.get(0)[1];
+        coopIpView.setTextColor(COL_OK);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ips.size(); i++) {
+            if (i > 0) {
+                sb.append('\n');
+            }
+            sb.append(ips.get(i)[0]).append(": ").append(ips.get(i)[1]);
+        }
+        coopIpView.setText(sb.toString());
+    }
+
+    private List<String[]> detectNetworkIps() {
+        List<String[]> vpn = new ArrayList<>();
+        List<String[]> lan = new ArrayList<>();
+        List<String[]> other = new ArrayList<>();
+        try {
+            Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
+            if (ifaces != null) {
+                for (NetworkInterface nif : Collections.list(ifaces)) {
+                    if (!nif.isUp() || nif.isLoopback()) {
+                        continue;
+                    }
+                    String ifName = nif.getName().toLowerCase(Locale.US);
+                    for (InetAddress addr : Collections.list(nif.getInetAddresses())) {
+                        if (!(addr instanceof Inet4Address) || addr.isLoopbackAddress()) {
+                            continue;
+                        }
+                        String ip = addr.getHostAddress();
+                        if (ip == null) {
+                            continue;
+                        }
+                        boolean isCgnatVpn = isTailscaleRange(ip)
+                                || ifName.startsWith("tun")
+                                || ifName.startsWith("tailscale")
+                                || ifName.startsWith("wg")
+                                || ifName.startsWith("zt")
+                                || ifName.startsWith("ppp");
+                        if (isCgnatVpn) {
+                            vpn.add(new String[] { "VPN / Online (" + ifName + ")", ip });
+                        } else if (ifName.startsWith("wlan") || ifName.startsWith("swlan") || ifName.startsWith("ap")) {
+                            lan.add(new String[] { "Wi-Fi / Hotspot (" + ifName + ")", ip });
+                        } else {
+                            other.add(new String[] { "Red (" + ifName + ")", ip });
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        List<String[]> all = new ArrayList<>(vpn.size() + lan.size() + other.size());
+        all.addAll(vpn);
+        all.addAll(lan);
+        all.addAll(other);
+        return all;
+    }
+
+    private static boolean isTailscaleRange(String ip) {
+        String[] parts = ip.split("\\.");
+        if (parts.length != 4) {
+            return false;
+        }
+        try {
+            int a = Integer.parseInt(parts[0]);
+            int b = Integer.parseInt(parts[1]);
+            return a == 100 && b >= 64 && b <= 127;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private List<String[]> getAvailableZombieMaps() {
+        String[][] known = {
+                { "zombie_theater", "Kino der Toten (zombie_theater)" },
+                { "zombie_pentagon", "Five (zombie_pentagon)" },
+                { "zombie_cosmodrome", "Ascension (zombie_cosmodrome)" },
+                { "zombie_coast", "Call of the Dead (zombie_coast)" },
+                { "zombie_temple", "Shangri-La (zombie_temple)" },
+                { "zombie_moon", "Moon (zombie_moon)" },
+                { "zombie_cod5_prototype", "Nacht der Untoten (zombie_cod5_prototype)" },
+                { "zombie_cod5_asylum", "Verrückt (zombie_cod5_asylum)" },
+                { "zombie_cod5_sumpf", "Shi No Numa (zombie_cod5_sumpf)" },
+                { "zombie_cod5_factory", "Der Riese (zombie_cod5_factory)" },
+                { "zombietron", "Dead Ops Arcade (zombietron)" },
+        };
+        List<String[]> found = new ArrayList<>();
+        File gameDir = getActiveGameDir();
+        File commonDir = new File(new File(gameDir, "zone"), "Common");
+        if (commonDir.isDirectory()) {
+            for (String[] k : known) {
+                if (new File(commonDir, k[0] + ".ff").isFile()) {
+                    found.add(k);
+                }
+            }
+            File[] files = commonDir.listFiles();
+            if (files != null) {
+                Arrays.sort(files);
+                for (File f : files) {
+                    String n = f.getName();
+                    if (!n.endsWith(".ff") || !n.startsWith("zombie")) {
+                        continue;
+                    }
+                    if (n.endsWith("_patch.ff") || n.endsWith("_load.ff")) {
+                        continue;
+                    }
+                    String code = n.substring(0, n.length() - 3);
+                    boolean already = false;
+                    for (String[] existing : found) {
+                        if (existing[0].equals(code)) {
+                            already = true;
+                            break;
+                        }
+                    }
+                    if (!already) {
+                        found.add(new String[] { code, code });
+                    }
+                }
+            }
+        }
+        if (found.isEmpty()) {
+            found.add(known[0]);
+            found.add(known[1]);
+        }
+        return found;
+    }
+
+    private void recordRecentCoopIp(String ip) {
+        List<String> list = new ArrayList<>();
+        list.add(ip);
+        if (coopRecentIps != null && !coopRecentIps.isEmpty()) {
+            for (String s : coopRecentIps.split(",")) {
+                String t = s.trim();
+                if (!t.isEmpty() && !t.equals(ip) && list.size() < 4) {
+                    list.add(t);
+                }
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(list.get(i));
+        }
+        coopRecentIps = sb.toString();
+    }
+
+    private static String sanitizePlayerName(String raw) {
+        if (raw == null) {
+            return "Survivor";
+        }
+        String cleaned = raw.replace("\"", "").replace("'", "").replaceAll("[\\r\\n\\t]", " ").trim();
+        if (cleaned.isEmpty()) {
+            return "Survivor";
+        }
+        if (cleaned.length() > 20) {
+            cleaned = cleaned.substring(0, 20).trim();
+        }
+        return cleaned;
     }
 
     private File getActiveGameDir() {
@@ -891,12 +1321,13 @@ public class LauncherActivity extends Activity {
                     }
                 });
 
+        int shadowSpinIdx = (shadows == 2) ? 0 : (shadows == 1 ? 1 : 2);
         addSpinnerRow(card, "Sombras dinámicas", new String[] {
-                "Activadas (ideal 60 FPS)", "Desactivadas (+FPS y -calor)"
-        }, shadows == 1 ? 0 : 1, new IntConsumer() {
+                "Móvil Rápidas (256p + Half-Rate, ideal 90 FPS)", "Completas (512p PC)", "Desactivadas (+FPS y -calor)"
+        }, shadowSpinIdx, new IntConsumer() {
                     @Override
                     public void accept(int v) {
-                        shadows = (v == 0) ? 1 : 0;
+                        shadows = (v == 0) ? 2 : (v == 1 ? 1 : 0);
                     }
                 });
 
@@ -1025,10 +1456,48 @@ public class LauncherActivity extends Activity {
     }
 
     private void launchGame() {
-        launchGame(null, null);
+        launchGameInternal(null, null, null);
     }
 
     private void launchGame(String autoloadSlot, String autoloadMap) {
+        launchGameInternal(autoloadSlot, autoloadMap, null);
+    }
+
+    private void launchCoopHost(String mapCode, int maxPlayers) {
+        String safeName = sanitizePlayerName(coopName);
+        applyPlayerNameToConfig(safeName);
+        String argName = safeName.replace(' ', '_');
+        String extra = " +set systemlink 1 +set net_port 28960"
+                + " +set sv_maxclients " + maxPlayers
+                + " +set bo1_expected_players 1"
+                + " +set sv_maxRate 25000"
+                + " +set name " + argName
+                + " +map " + mapCode;
+        launchGameInternal(null, null, extra);
+    }
+
+    private void launchCoopJoin(String targetIp) {
+        String safeName = sanitizePlayerName(coopName);
+        applyPlayerNameToConfig(safeName);
+        String argName = safeName.replace(' ', '_');
+        String target = targetIp.trim();
+        if (!target.contains(":")) {
+            target = target + ":28960";
+        }
+        String extra = " +set systemlink 1 +set net_port 28960"
+                + " +set name " + argName
+                + " +connect " + target;
+        launchGameInternal(null, null, extra);
+    }
+
+    private void applyPlayerNameToConfig(String playerName) {
+        File playersDir = new File(new File(filesDir, "home"), "players");
+        String[][] pairs = { { "name", playerName }, { "sv_maxRate", "25000" } };
+        updateCfgKeys(new File(playersDir, "config.cfg"), pairs);
+        updateCfgKeys(new File(playersDir, "config_mp.cfg"), pairs);
+    }
+
+    private void launchGameInternal(String autoloadSlot, String autoloadMap, String coopExtraArgs) {
         File gameDir = getActiveGameDir();
         if (!isGameDirValid(gameDir)) {
             selectTab(0);
@@ -1054,7 +1523,9 @@ public class LauncherActivity extends Activity {
         args.append(" +set bo1_renderer ").append(renderer);
         args.append(" +set r_vsync ").append(vsync);
         args.append(" +set com_maxfps ").append(maxFps);
-        args.append(" +set sm_enable ").append(shadows);
+        args.append(" +set sm_enable ").append(shadows == 0 ? 0 : 1);
+        args.append(" +set bo1_shadow_res ").append(shadows == 2 ? 256 : (shadows == 1 ? 512 : 0));
+        args.append(" +set bo1_shadow_fast ").append(shadows == 2 ? 1 : 0);
         args.append(" +set r_shaderWarming ").append(shaderWarming);
         args.append(" +set bo1_vk_async ").append(vkAsync);
         args.append(" +set bo1_fpscounter ").append(fpsCounter);
@@ -1084,7 +1555,9 @@ public class LauncherActivity extends Activity {
         if (mode != null) {
             args.append(" +set r_mode ").append(mode);
         }
-        if (autoloadSlot != null && !autoloadSlot.isEmpty() && autoloadMap != null && !autoloadMap.isEmpty()) {
+        if (coopExtraArgs != null && !coopExtraArgs.isEmpty()) {
+            args.append(coopExtraArgs);
+        } else if (autoloadSlot != null && !autoloadSlot.isEmpty() && autoloadMap != null && !autoloadMap.isEmpty()) {
             args.append(" +set systemlink 0 +set bo1_expected_players 0 +set bo1_zm_autoload ")
                     .append(autoloadSlot)
                     .append(" +map ")

@@ -3617,6 +3617,8 @@ void __cdecl R_GenerateSortedDrawSurfs(
     rg.isNotRenderingFullScreen = !sceneParms->isRenderingFullScreen;
     rg.sunShadowFull = 1;
     LODWORD(rg.sunShadowmapScale) = sm_sunShadowScale->current.integer;
+    if ( bo1_shadow_fast && bo1_shadow_fast->current.enabled && rg.sunShadowmapScale > 0.5f )
+        rg.sunShadowmapScale = 0.5f;
     bestDen = 1;
     bestNum = 1;
     bestError = 1.0f;
@@ -3796,6 +3798,7 @@ void __cdecl R_GenerateSortedDrawSurfs(
 
     {
         PROF_SCOPED("bsp surfaces"); 
+        frontEndDataOut->bo1SkipSunShadowRender = false;
         if (gfxDrawMethod.drawScene == GFX_DRAW_SCENE_STANDARD)
         {
             R_AddAllBspDrawSurfacesCamera(viewInfo->localClientNum, viewInfo->visibleLights, viewInfo->visibleLightCount);
@@ -3815,13 +3818,62 @@ void __cdecl R_GenerateSortedDrawSurfs(
             if (R_GetAllowShadowMaps())
                 R_ChooseShadowedLights(viewInfo);
             R_UpdateDrawMethod(frontEndDataOut);
-            if (dynamicShadowType == SHADOW_MAP
-                && Com_BitCheckAssert(frontEndDataOut->shadowableLightHasShadowMap, rgp.world->sunPrimaryLightIndex, 32))
+            static GfxSunShadow s_cachedSunShadow;
+            static const GfxWorld *s_cachedSunWorld = NULL;
+            static unsigned int s_cachedSunEpoch = 0;
+            static int s_cachedSunRes = 0;
+            static float s_cachedSunScale = 0.0f;
+            static unsigned int s_sunShadowParity = 0;
+            static bool s_cachedSunValid = false;
+            const bool hasSunShadow = (dynamicShadowType == SHADOW_MAP
+                && Com_BitCheckAssert(frontEndDataOut->shadowableLightHasShadowMap, rgp.world->sunPrimaryLightIndex, 32));
+            bool reuseSunShadow = false;
+            if ( !forMissileCamView )
+            {
+                if ( !hasSunShadow )
+                {
+                    s_cachedSunValid = false;
+                    frontEndDataOut->bo1SkipSunShadowRender = false;
+                }
+                else
+                {
+                    const bool fastEnabled = (bo1_shadow_fast && bo1_shadow_fast->current.enabled);
+                    const bool cacheOk = fastEnabled
+                        && s_cachedSunValid
+                        && !viewInfo->playerTeleported
+                        && s_cachedSunWorld == rgp.world
+                        && s_cachedSunEpoch == dx.shadowmapInitEpoch
+                        && s_cachedSunRes == dx.sunShadowmapSize
+                        && fabs(s_cachedSunScale - rg.sunShadowmapScale) < 0.001f
+                        && !frontEndDataOut->prim.hasSunDirChanged;
+                    if ( cacheOk && ((++s_sunShadowParity & 1u) != 0) )
+                        reuseSunShadow = true;
+                    frontEndDataOut->bo1SkipSunShadowRender = reuseSunShadow;
+                }
+            }
+            if ( hasSunShadow )
             {
                 rg.drawSunShadow = 1;
-                R_SetupSunShadowMaps(viewParmsDpvs, &frontEndDataOut->sunShadow);
-                R_SetSunShadowConstants(&viewInfo->input, &frontEndDataOut->sunShadow.sunProj);
-                R_SunShadowMaps();
+                if ( reuseSunShadow )
+                {
+                    frontEndDataOut->sunShadow = s_cachedSunShadow;
+                    R_SetSunShadowConstants(&viewInfo->input, &frontEndDataOut->sunShadow.sunProj);
+                }
+                else
+                {
+                    R_SetupSunShadowMaps(viewParmsDpvs, &frontEndDataOut->sunShadow);
+                    R_SetSunShadowConstants(&viewInfo->input, &frontEndDataOut->sunShadow.sunProj);
+                    R_SunShadowMaps();
+                    if ( !forMissileCamView )
+                    {
+                        s_cachedSunShadow = frontEndDataOut->sunShadow;
+                        s_cachedSunWorld = rgp.world;
+                        s_cachedSunEpoch = dx.shadowmapInitEpoch;
+                        s_cachedSunRes = dx.sunShadowmapSize;
+                        s_cachedSunScale = rg.sunShadowmapScale;
+                        s_cachedSunValid = true;
+                    }
+                }
             }
         }
         else
@@ -3859,6 +3911,7 @@ void __cdecl R_GenerateSortedDrawSurfs(
 
     if ( gfxDrawMethod.drawScene == GFX_DRAW_SCENE_STANDARD
         && dynamicShadowType == SHADOW_MAP
+        && !frontEndDataOut->bo1SkipSunShadowRender
         && Com_BitCheckAssert(frontEndDataOut->shadowableLightHasShadowMap, rgp.world->sunPrimaryLightIndex, 32) )
     {
         {
@@ -3917,7 +3970,8 @@ void __cdecl R_GenerateSortedDrawSurfs(
         PROF_SCOPED("Sun Shadow");
         if ( dynamicShadowType == SHADOW_MAP )
         {
-            if ( Com_BitCheckAssert(frontEndDataOut->shadowableLightHasShadowMap, rgp.world->sunPrimaryLightIndex, 32) )
+            if ( !frontEndDataOut->bo1SkipSunShadowRender
+                && Com_BitCheckAssert(frontEndDataOut->shadowableLightHasShadowMap, rgp.world->sunPrimaryLightIndex, 32) )
             {
                 {
                     PROF_SCOPED("scene ent surfaces");

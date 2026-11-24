@@ -563,7 +563,7 @@ void __cdecl R_SetupSunShadowMapProjection(
     }
     else
     {
-        viewOrgInPixels[0][0] = 1023.0 - (maxsInSunProj[0][0] - viewOrgInSunProj[0]) * scaleToFitUsable;
+        viewOrgInPixels[0][0] = (float)(partitionRes - 1) - (maxsInSunProj[0][0] - viewOrgInSunProj[0]) * scaleToFitUsable;
         if (useShadowOffset)
         {
             viewOrgInPixels[1][0] = (double)farShadowMiddle - (viewOrgInSunProj[0] - shadowOrgInSunProj[0]) / sampleSizeFar;
@@ -582,7 +582,9 @@ void __cdecl R_SetupSunShadowMapProjection(
                 sunShadowSize = rg.sunShadowSize;
             partitionFar->viewport.width = sunShadowSize;
         }
-        partitionNear->viewport.x = 1024 - partitionNear->viewport.width;
+        partitionNear->viewport.x = (int)partitionRes - partitionNear->viewport.width;
+        if (partitionNear->viewport.x < 0)
+            partitionNear->viewport.x = 0;
         partitionFar->viewport.x = farShadowBegin;
     }
 
@@ -610,7 +612,7 @@ void __cdecl R_SetupSunShadowMapProjection(
     }
     else
     {
-        viewOrgInPixels[0][1] = 1023.0f - (viewOrgInSunProj[1] - minsInSunProj[0][1]) * scaleToFitUsable;
+        viewOrgInPixels[0][1] = (float)(partitionRes - 1) - (viewOrgInSunProj[1] - minsInSunProj[0][1]) * scaleToFitUsable;
         if (useShadowOffset)
         {
             viewOrgInPixels[1][1] = (double)farShadowMiddle - (viewOrgInSunProj[1] - shadowOrgInSunProj[1]) / sampleSizeFar;
@@ -626,7 +628,9 @@ void __cdecl R_SetupSunShadowMapProjection(
             else
                 partitionFar->viewport.height = rg.sunShadowSize;
         }
-        partitionNear->viewport.y = 1024 - partitionNear->viewport.height;
+        partitionNear->viewport.y = (int)partitionRes - partitionNear->viewport.height;
+        if (partitionNear->viewport.y < 0)
+            partitionNear->viewport.y = 0;
         partitionFar->viewport.y = farShadowBegin;
     }
 

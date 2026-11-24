@@ -757,7 +757,8 @@ void __cdecl RB_StandardDrawCommands(GfxViewInfo *viewInfo)
   oldSceneViewport = viewInfo->sceneViewport;
   if ( dynamicShadowType == SHADOW_MAP )
   {
-    if ( Com_BitCheckAssert(data->shadowableLightHasShadowMap, rgp.world->sunPrimaryLightIndex, 32) )
+    if ( Com_BitCheckAssert(data->shadowableLightHasShadowMap, rgp.world->sunPrimaryLightIndex, 32)
+      && !data->bo1SkipSunShadowRender )
       RB_SunShadowMaps(data, viewInfo);
     RB_SpotShadowMaps(data, viewInfo);
   }

@@ -127,6 +127,8 @@ struct __declspec(align(8)) DxGlobals // sizeof=0x2D00
     int sunSpriteSamples;               // XREF: R_Init(void)+4F/w
                                         // R_Init(void)+54/r ...
     int sunShadowmapSize; // not a real name, not in IDA for some reason
+    int spotShadowmapSize; // mod (custom24): configurable spot shadow tile size (256/512)
+    unsigned int shadowmapInitEpoch; // mod (custom24): incremented on shadow RT init/reset
     struct IDirect3DSurface9 *singleSampleDepthStencilSurface;
                                         // XREF: R_GenerateSortedDrawSurfs+381/r
                                         // R_GenerateSortedDrawSurfs:loc_A62FDD/r ...

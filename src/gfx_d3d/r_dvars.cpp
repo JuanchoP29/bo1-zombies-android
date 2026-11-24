@@ -189,6 +189,8 @@ const dvar_s *sm_fastSunShadow;
 const dvar_s *sm_qualitySpotShadow;
 const dvar_s *sm_fullResSpotShadowEnable;
 const dvar_s *sm_debugFastSunShadow;
+const dvar_s *bo1_shadow_res;
+const dvar_s *bo1_shadow_fast;
 const dvar_s *r_stream;
 const dvar_s *r_streamCheckAabb;
 const dvar_s *r_streamClear;
@@ -1470,6 +1472,8 @@ void __cdecl R_RegisterDvars()
                                                                  0x1080u,
                                                                  "Provides high-res spot shadows for the only one spotlight in the scene.");
     sm_debugFastSunShadow = _Dvar_RegisterBool("sm_debugFastSunShadow", 0, 0x80u, "Debug fast sun shadow");
+    bo1_shadow_res = _Dvar_RegisterInt("bo1_shadow_res", 0, 0, 1024, 1u, "mod: shadow map tile resolution override (0=auto, 256, 512, 1024)");
+    bo1_shadow_fast = _Dvar_RegisterBool("bo1_shadow_fast", 0, 1u, "mod: half-rate sun shadow updates and reduced far cascade for mobile");
     r_stream = _Dvar_RegisterInt("r_stream", 7, 0, 7, 0x80u, "Stream high mip levels (1=world|2=xmodels|4=bmodels)");
     r_streamCheckAabb = _Dvar_RegisterBool("r_streamCheckAabb", 0, 0x80u, "Enables runtime checking of stream aabb tree");
     r_streamClear = _Dvar_RegisterBool("r_streamClear", 0, 0x80u, "Set true to clear all streamed highmip levels");

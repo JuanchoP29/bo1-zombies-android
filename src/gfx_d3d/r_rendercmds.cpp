@@ -160,6 +160,7 @@ unsigned int R_InitSpotShadowMeshes()
     float ya; // [esp+2Ch] [ebp-8h]
     unsigned int spotShadowIndex; // [esp+30h] [ebp-4h]
 
+    const float spotSize = (float)(dx.spotShadowmapSize ? dx.spotShadowmapSize : 512);
     y = 0.0f;
     for ( spotShadowIndex = 0; spotShadowIndex < 4; ++spotShadowIndex )
     {
@@ -168,14 +169,14 @@ unsigned int R_InitSpotShadowMeshes()
             &gfxMeshGlob.spotShadowClearMeshData[spotShadowIndex],
             0.0,
             y,
-            512.0,
-            512.0,
+            spotSize,
+            spotSize,
             0.0,
             0.0,
             1.0,
             1.0,
             0xFFFFFFFF);
-        y = y + 512.0;
+        y = y + spotSize;
         result = spotShadowIndex + 1;
     }
     ya = 0.0f;

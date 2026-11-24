@@ -136,16 +136,17 @@ char __cdecl R_AddSpotShadowsForLight(
     }
     else
     {
+        const int spotSize = dx.spotShadowmapSize ? dx.spotShadowmapSize : 512;
         spotShadow->viewport.x = 0;
-        spotShadow->viewport.y = spotShadowIndex << 9;
-        spotShadow->viewport.width = 512;
-        spotShadow->viewport.height = 512;
+        spotShadow->viewport.y = spotShadowIndex * spotSize;
+        spotShadow->viewport.width = spotSize;
+        spotShadow->viewport.height = spotSize;
         spotShadow->image = gfxRenderTargets[R_RENDERTARGET_SHADOWMAP_SPOT].image;
         spotShadow->renderTargetId = R_RENDERTARGET_SHADOWMAP_SPOT;
-        spotShadow->pixelAdjust[0] = 0.00048828125f;
-        spotShadow->pixelAdjust[1] = 0.00024414062f;
-        spotShadow->pixelAdjust[2] = 0.0009765625f;
-        spotShadow->pixelAdjust[3] = -0.00012207031f;
+        spotShadow->pixelAdjust[0] = 0.25f / (float)spotSize;
+        spotShadow->pixelAdjust[1] = 0.5f / (float)(4 * spotSize);
+        spotShadow->pixelAdjust[2] = 0.5f / (float)spotSize;
+        spotShadow->pixelAdjust[3] = -0.25f / (float)(4 * spotSize);
         if (v7)
             spotShadow->clearScreen = spotShadowIndex == 2;
         else

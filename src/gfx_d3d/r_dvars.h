@@ -180,6 +180,8 @@ extern const dvar_s *sm_fastSunShadow;
 extern const dvar_s *sm_qualitySpotShadow;
 extern const dvar_s *sm_fullResSpotShadowEnable;
 extern const dvar_s *sm_debugFastSunShadow;
+extern const dvar_s *bo1_shadow_res;
+extern const dvar_s *bo1_shadow_fast;
 extern const dvar_s *r_stream;
 extern const dvar_s *r_streamCheckAabb;
 extern const dvar_s *r_streamClear;

@@ -153,8 +153,16 @@ void R_InitRenderTargets_PC()
         if (sm_qualitySpotShadow && !sm_qualitySpotShadow->current.enabled)
             dx.sunShadowmapSize = 512;
 #endif
+        if (bo1_shadow_res)
+        {
+            const int req = bo1_shadow_res->current.integer;
+            if (req == 256 || req == 512 || req == 1024)
+                dx.sunShadowmapSize = req;
+        }
+        dx.spotShadowmapSize = (dx.sunShadowmapSize <= 256) ? 256 : 512;
+        ++dx.shadowmapInitEpoch;
         R_InitShadowmapRenderTarget(0, dx.sunShadowmapSize, 2u, &gfxRenderTargets[R_RENDERTARGET_SHADOWMAP_SUN], SHADOWMAP_RT_TILE_VERTICAL);
-        R_InitShadowmapRenderTarget(1, 0x200u, 4u, &gfxRenderTargets[R_RENDERTARGET_SHADOWMAP_SPOT], SHADOWMAP_RT_TILE_VERTICAL);
+        R_InitShadowmapRenderTarget(1, dx.spotShadowmapSize, 4u, &gfxRenderTargets[R_RENDERTARGET_SHADOWMAP_SPOT], SHADOWMAP_RT_TILE_VERTICAL);
         R_InitFullscreenRenderTargetImage(
             5,
             FULLSCREEN_SCENE,
